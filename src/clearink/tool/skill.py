@@ -59,8 +59,12 @@ class Skill:
 _skill = Skill()
 
 
+def get_available_skills() -> dict[str, dict]:
+    return dict(_skill.AVAILABLE_SKILLS)
+
+
 @register_tool(name="load_skill",
-    discription="根据skill名称路由并返回其完整内容",
+    description="根据skill名称路由并返回其完整内容",
     input_schema={"type": "object","properties": {"name": {"type": "string","description": "要加载的skill名称",},},"required": ["name"],})
 def load_skill(name: str) -> str:
     info = _skill.AVAILABLE_SKILLS.get(name)
