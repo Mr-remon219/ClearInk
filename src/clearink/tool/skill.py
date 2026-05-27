@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from clearink.tool.register import register_tool
 from ..config import SKILLS_DIR
 
 
@@ -58,28 +59,11 @@ class Skill:
 _skill = Skill()
 
 
+@register_tool(name="load_skill",
+    discription="根据skill名称路由并返回其完整内容",
+    input_schema={"type": "object","properties": {"name": {"type": "string","description": "要加载的skill名称",},},"required": ["name"],})
 def load_skill(name: str) -> str:
     info = _skill.AVAILABLE_SKILLS.get(name)
     if info is None:
         return f"skill调用失败, 原因: 不存在名为 '{name}' 的skill"
     return info["content"]
-
-
-# 延迟导入避免与 tool.py 的循环引用
-from clearink.tool.tool import register_tool  # noqa: E402
-
-load_skill = register_tool(
-    name="load_skill",
-    discription="根据skill名称路由并返回其完整内容",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "要加载的skill名称",
-            },
-        },
-        "required": ["name"],
-    },
-)(load_skill)
-    
