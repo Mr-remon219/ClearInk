@@ -5,7 +5,7 @@ import platform
 
 from .tool.skill import get_available_skills
 
-_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "system_prompts"
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "system_prompts"
 
 
 def system_build() -> str:

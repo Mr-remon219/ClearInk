@@ -89,7 +89,7 @@ def layer3_archive_results(messages: list, config: CompactConfig) -> list:
                         block_content, tool_id, exchange_idx, config.task_outputs_dir,
                     )
                     block["content"] = (
-                        f"[Tool output archived -> task_outputs/{filename}]"
+                        f"[Tool output archived -> data/task_outputs/{filename}]"
                     )
                 except OSError:
                     pass  # keep original content
@@ -146,7 +146,7 @@ def layer2_placeholder_large(
                         )
                         msg["content"] = (
                             f"[Content compacted: {len(content)} chars "
-                            f"-> see .transcripts/{filename}]"
+                            f"-> see data/.transcripts/{filename}]"
                         )
                         l2_idx += 1
                     except OSError:
@@ -168,7 +168,7 @@ def layer2_placeholder_large(
                             )
                             block[key] = (
                                 f"[Content compacted: {len(block_text)} chars "
-                                f"-> see .transcripts/{filename}]"
+                                f"-> see data/.transcripts/{filename}]"
                             )
                             l2_idx += 1
                         except OSError:

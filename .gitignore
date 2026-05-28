@@ -10,4 +10,8 @@ wheels/
 .venv
 
 .env
-.clearink/
+data/.transcripts/*
+!data/.transcripts/.gitkeep
+data/task_outputs/*
+!data/task_outputs/.gitkeep
+.claude

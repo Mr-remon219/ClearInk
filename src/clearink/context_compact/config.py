@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-_CLEARINK_DIR = Path.cwd() / ".clearink"
+_CLEARINK_DIR = Path(__file__).resolve().parents[3] / "data"
 
 
 @dataclass

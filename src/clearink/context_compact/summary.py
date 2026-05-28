@@ -29,7 +29,7 @@ def build_summary(
     transcripts_path: Path,
 ) -> str:
     lines = [
-        f"[Context compacted — full transcript saved to .transcripts/{transcripts_path.name}]",
+        f"[Context compacted — full transcript saved to data/.transcripts/{transcripts_path.name}]",
         "",
     ]
 
