@@ -26,7 +26,8 @@ def _format_todos() -> str:
 
 @register_tool(
     name="todo_write",
-    description="维护动态 CURRENT_TODOS 列表，用于任务规划与进度追踪。"
+    description="维护简单的扁平 TODO 列表（无依赖关系）。"
+                "如需带前置依赖的任务管理，请使用 create_task/claim_task/complete_task。"
                 "merge=true 时按 id 合并(新增或更新)，merge=false 时全量替换。",
     input_schema={
         "type": "object",

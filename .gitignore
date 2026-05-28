@@ -14,4 +14,10 @@ data/.transcripts/*
 !data/.transcripts/.gitkeep
 data/task_outputs/*
 !data/task_outputs/.gitkeep
+data/.tasks/*
+!data/.tasks/.gitkeep
+data/team/*
+!data/team/.gitkeep
+data/.scheduled_tasks/*
+!data/.scheduled_tasks/.gitkeep
 .claude

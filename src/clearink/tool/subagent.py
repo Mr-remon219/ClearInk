@@ -1,6 +1,11 @@
 import os
 from anthropic import Anthropic
+from dotenv import load_dotenv
+
 from .register import register_tool, TOOL as ALL_TOOLS, TOOL_HANDLERS
+from ..config import ENV_PATH
+
+load_dotenv(ENV_PATH, override=True)
 
 
 def _subagent_tools() -> list[dict]:
@@ -31,7 +36,7 @@ def spawn_subagent(prompt: str) -> str:
 
     for _ in range(5):
         response = sub_client.messages.create(
-            model=os.getenv("SUBAGENT_MODEL"),
+            model=os.getenv("SUBAGENT_MODEL", "deepseek-v4-flash"),
             messages=messages,
             tools=tools,
             max_tokens=2048,

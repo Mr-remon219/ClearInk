@@ -71,7 +71,7 @@ def reactive_compact(
         )
     except OSError:
         warnings.warn("Failed to write transcript; reactive compact without save")
-        transcript_path = Path("data/.transcripts/unknown.json")
+        transcript_path = config.transcripts_dir / "unknown.json"
 
     prev_summary = read_previous_summary(messages)
     summary = build_summary(messages, prev_summary, hook_context, transcript_path)

@@ -5,21 +5,39 @@ import os
 
 from .config import ENV_PATH
 from .tool.register import TOOL, TOOL_HANDLERS
-from .tool import basetool, skill, todo, subagent  # noqa: F401 — side-effect: registers tools
+from .tool import basetool, skill, todo, subagent, task_system, background, scheduler, teammate  # noqa: F401 — registers tools
 from .hook import run_hooks, hook_context
+from .system_prompt.memory_load import load_memories, extract_memories
+from .system_prompt.memory_store import consolidate_memories
+from .system_prompt.system_build import get_system_prompt
+from .error_recovery.wrapper import safe_api_call
+from .system_prompt import memory_tool  # noqa: F401 — registers save_memory tool
 from .context_compact import CompactConfig, compact_messages, reactive_compact
 from .context_compact.token_estimate import estimate_tokens
 
 load_dotenv(ENV_PATH, override=True)
 model = os.getenv("MODEL")
 thinking_type = os.getenv("THINKING_TYPE")
-thinking_effort = os.getenv("THINKING_EFFORT")
+thinking_budget = int(os.getenv("THINKING_BUDGET", "0") or "0")
+base_url = os.getenv("ANTHROPIC_BASE_URL", "")
 client = Anthropic()
+
+def _build_thinking() -> dict:
+    t = {"type": thinking_type}
+    if thinking_type == "enabled" and thinking_budget > 0:
+        t["budget_tokens"] = thinking_budget
+    return t
+
+def _build_extra_body() -> dict:
+    body = {}
+    effort = os.getenv("THINKING_EFFORT")
+    if effort and "deepseek" in base_url.lower():
+        body["output_config"] = {"effort": effort}
+    return body
 
 
 def agent_loop(
     messages: list,
-    system: str = "",
     compact_config: CompactConfig | None = None,
 ) -> list:
     turn_count = 0
@@ -35,6 +53,10 @@ def agent_loop(
             "hook_context": hook_context,
         })
 
+        # Collect completed background task results
+        for bg_result in background.collect_background_results():
+            messages.append({"role": "user", "content": bg_result})
+
         # Context compaction — once per turn, after hooks, before API call
         if turn_count > 0 and turn_count != last_compacted_turn:
             if turn_count % config.compact_interval_turns == 0:
@@ -43,7 +65,7 @@ def agent_loop(
                     messages, config, hook_context, compact_round,
                 )
 
-            if turn_count % config.reactive_interval_turns == 0:
+            elif turn_count % config.reactive_interval_turns == 0:
                 estimated = estimate_tokens(
                     messages, config.token_estimation_chars_per_token,
                 )
@@ -55,15 +77,22 @@ def agent_loop(
 
             last_compacted_turn = turn_count
 
+        # Load relevant memories for this turn
+        load_memories(messages)
+
         try:
-            response = client.messages.create(
+            response, messages, compact_round = safe_api_call(
+                client,
                 model=model,
-                system=system,
+                system=get_system_prompt(),
                 messages=messages,
                 tools=TOOL,
                 max_tokens=4096,
-                thinking={"type": thinking_type},
-                extra_body={"output_config": {"effort": thinking_effort}},
+                thinking=_build_thinking(),
+                extra_body=_build_extra_body(),
+                config=config,
+                hook_context=hook_context,
+                compact_round=compact_round,
             )
         except Exception as e:
             print(f"[Error] API call failed: {e}")
@@ -77,6 +106,15 @@ def agent_loop(
                 "turns": turn_count,
                 "hook_context": hook_context,
             })
+            # Collect teammate messages before returning
+            for tm_msg in teammate.collect_teammate_messages():
+                messages.append(tm_msg)
+
+            # Extract and consolidate memories from this session
+            extracted = extract_memories(messages)
+            if extracted:
+                result = consolidate_memories(extracted)
+                print(f"[Memory] {result}")
             return messages
 
         if response.stop_reason == "max_tokens":
@@ -87,10 +125,13 @@ def agent_loop(
                     messages.append({"role": "assistant", "content": content_block.text})
             continue
 
+        processed = False
         for content_block in response.content:
             if content_block.type == "text":
+                processed = True
                 messages.append({"role": "assistant", "content": content_block.text})
             elif content_block.type == "tool_use":
+                processed = True
                 tool_name = content_block.name
                 tool_args = content_block.input
 
@@ -102,7 +143,12 @@ def agent_loop(
 
                 handler = TOOL_HANDLERS.get(tool_name)
                 try:
-                    result = handler(**tool_args) if handler else f"Unknown tool: {tool_name}"
+                    if handler and background.should_run_background(tool_name, tool_args):
+                        result = background.start_background_task(
+                            tool_name, tool_args, handler,
+                        )
+                    else:
+                        result = handler(**tool_args) if handler else f"Unknown tool: {tool_name}"
                     error = None
                 except Exception as e:
                     result = None
@@ -129,9 +175,15 @@ def agent_loop(
                     }],
                 })
 
+        if not processed:
+            messages.append({"role": "user", "content": f"[System: unexpected stop_reason={response.stop_reason}]"})
+
 
 def main():
-    from .system_build import system_build
-    system_msg = system_build()
-    messages = []
-    agent_loop(messages, system=system_msg)
+    scheduler.set_agent_loop(agent_loop)
+    scheduler.set_busy(True)
+    try:
+        messages = []
+        agent_loop(messages)
+    finally:
+        scheduler.set_busy(False)
