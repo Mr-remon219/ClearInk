@@ -41,11 +41,12 @@ def write_transcript(
 def write_l2_content(
     content: str,
     session_id: str,
+    round_number: int,
     idx: int,
     transcripts_dir: Path,
 ) -> str:
     transcripts_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{session_id}_l2_{idx}.txt"
+    filename = f"{session_id}_round{round_number:03d}_l2_{idx}.txt"
     filepath = transcripts_dir / filename
     try:
         filepath.write_text(content, encoding="utf-8")

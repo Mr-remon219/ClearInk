@@ -1,6 +1,5 @@
 from __future__ import annotations
 import warnings
-from pathlib import Path
 
 from .config import CompactConfig
 from .token_estimate import estimate_tokens
@@ -28,7 +27,7 @@ def compact_messages(
 
     messages = layer3_archive_results(messages, config)
     messages = layer1_trim_middle(messages, config)
-    messages = layer2_placeholder_large(messages, config)
+    messages = layer2_placeholder_large(messages, config, round_number)
 
     estimated = estimate_tokens(messages, config.token_estimation_chars_per_token)
     if estimated <= config.l4_trigger_tokens:
@@ -77,6 +76,14 @@ def reactive_compact(
     summary = build_summary(messages, prev_summary, hook_context, transcript_path)
 
     keep = config.reactive_keep_last_messages
-    kept = messages[-keep:] if len(messages) > keep else list(messages)
+    exchanges = segment_exchanges(messages)
+    kept_exchanges = []
+    kept_count = 0
+    for exchange in reversed(exchanges):
+        kept_exchanges.insert(0, exchange)
+        kept_count += len(exchange)
+        if kept_count >= keep:
+            break
+    kept = rebuild_messages(kept_exchanges)
     kept.insert(0, {"role": "user", "content": summary})
     return kept

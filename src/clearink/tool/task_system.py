@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import threading
 from pathlib import Path
 
 from .register import register_tool
@@ -49,10 +50,18 @@ def _max_id(tasks: dict[str, dict]) -> int:
     return n
 
 
+def _task_sort_key(task_id: str) -> tuple[int, int | str]:
+    try:
+        return (0, int(task_id))
+    except ValueError:
+        return (1, task_id)
+
+
 class TaskManager:
     def __init__(self):
         self.list_tasks: dict[str, dict] = _load_all_tasks()
         self._counter: int = _max_id(self.list_tasks)
+        self._lock = threading.RLock()
 
     # ── public API ──────────────────────────────────────
 
@@ -62,120 +71,129 @@ class TaskManager:
         description: str = "",
         blockedBy: list[str] | None = None,
     ) -> str:
-        blocked = blockedBy or []
+        with self._lock:
+            blocked = list(dict.fromkeys(blockedBy or []))
 
-        for bid in blocked:
-            if bid not in self.list_tasks:
-                return f"Error: blockedBy task '{bid}' does not exist. Create it first."
+            for bid in blocked:
+                if bid not in self.list_tasks:
+                    return f"Error: blockedBy task '{bid}' does not exist. Create it first."
 
-        self._counter += 1
-        task_id = str(self._counter)
+            self._counter += 1
+            task_id = str(self._counter)
 
-        task = {
-            "id": task_id,
-            "subject": subject,
-            "description": description,
-            "status": "pending",
-            "owner": "",
-            "blockedBy": blocked,
-            "blocks": [],
-        }
-        self.list_tasks[task_id] = task
+            task = {
+                "id": task_id,
+                "subject": subject,
+                "description": description,
+                "status": "pending",
+                "owner": "",
+                "blockedBy": blocked,
+                "blocks": [],
+            }
+            self.list_tasks[task_id] = task
 
-        for bid in blocked:
-            self.list_tasks[bid]["blocks"].append(task_id)
-            _write_task(self.list_tasks[bid])
+            for bid in blocked:
+                blocks = self.list_tasks[bid].setdefault("blocks", [])
+                if task_id not in blocks:
+                    blocks.append(task_id)
+                _write_task(self.list_tasks[bid])
 
-        _write_task(task)
-        return self._format_task(task_id)
+            _write_task(task)
+            return self._format_task(task_id)
 
     def can_start(self, task_id: str) -> bool:
-        task = self.list_tasks.get(task_id)
-        if task is None:
-            return False
-        if task["status"] != "pending":
-            return False
-        for bid in task["blockedBy"]:
-            dep = self.list_tasks.get(bid)
-            if dep is None or dep["status"] != "completed":
+        with self._lock:
+            task = self.list_tasks.get(task_id)
+            if task is None:
                 return False
-        return True
+            if task["status"] != "pending":
+                return False
+            for bid in task["blockedBy"]:
+                dep = self.list_tasks.get(bid)
+                if dep is None or dep["status"] != "completed":
+                    return False
+            return True
 
     def claim_task(self, task_id: str, owner: str = "agent") -> str:
-        task = self.list_tasks.get(task_id)
-        if task is None:
-            return f"Error: task '{task_id}' not found."
+        with self._lock:
+            task = self.list_tasks.get(task_id)
+            if task is None:
+                return f"Error: task '{task_id}' not found."
 
-        if task["status"] != "pending":
-            return f"Error: task '{task_id}' is already {task['status']} (owner: {task.get('owner', 'none')})."
+            if task["status"] != "pending":
+                return f"Error: task '{task_id}' is already {task['status']} (owner: {task.get('owner', 'none')})."
 
-        blocked = [bid for bid in task["blockedBy"]
-                   if self.list_tasks.get(bid, {}).get("status") != "completed"]
-        if blocked:
-            return f"Error: task '{task_id}' is blocked by: {blocked}"
+            blocked = [bid for bid in task["blockedBy"]
+                       if self.list_tasks.get(bid, {}).get("status") != "completed"]
+            if blocked:
+                return f"Error: task '{task_id}' is blocked by: {blocked}"
 
-        task["status"] = "in_progress"
-        task["owner"] = owner
-        _write_task(task)
-        return f"Task '{task_id}' claimed by {owner}."
+            task["status"] = "in_progress"
+            task["owner"] = owner
+            _write_task(task)
+            return f"Task '{task_id}' claimed by {owner}."
 
     def complete_task(self, task_id: str) -> str:
-        task = self.list_tasks.get(task_id)
-        if task is None:
-            return f"Error: task '{task_id}' not found."
+        with self._lock:
+            task = self.list_tasks.get(task_id)
+            if task is None:
+                return f"Error: task '{task_id}' not found."
 
-        if task["status"] != "in_progress":
-            return f"Error: task '{task_id}' is {task['status']}, not in_progress."
+            if task["status"] != "in_progress":
+                return f"Error: task '{task_id}' is {task['status']}, not in_progress."
 
-        task["status"] = "completed"
-        task["owner"] = ""
-        _write_task(task)
+            task["status"] = "completed"
+            task["owner"] = ""
+            _write_task(task)
 
-        unblocked = []
-        for child_id in task["blocks"]:
-            child = self.list_tasks.get(child_id)
-            if child and child["status"] == "pending" and self.can_start(child_id):
-                unblocked.append(child_id)
+            unblocked = []
+            for child_id in task["blocks"]:
+                child = self.list_tasks.get(child_id)
+                if child and child["status"] == "pending" and self.can_start(child_id):
+                    unblocked.append(child_id)
 
-        msg = f"Task '{task_id}' completed."
-        if unblocked:
-            msg += f" Unblocked: {unblocked}"
-        return msg
+            msg = f"Task '{task_id}' completed."
+            if unblocked:
+                msg += f" Unblocked: {unblocked}"
+            return msg
 
     def get_task(self, task_id: str) -> str:
-        task = self.list_tasks.get(task_id)
-        if task is None:
-            return f"Error: task '{task_id}' not found."
-        return json.dumps(task, ensure_ascii=False, indent=2)
+        with self._lock:
+            task = self.list_tasks.get(task_id)
+            if task is None:
+                return f"Error: task '{task_id}' not found."
+            return json.dumps(task, ensure_ascii=False, indent=2)
 
     def format_task_list(self) -> str:
-        if not self.list_tasks:
-            return "(no tasks)"
+        with self._lock:
+            if not self.list_tasks:
+                return "(no tasks)"
 
-        lines = []
-        for tid in sorted(self.list_tasks, key=lambda x: int(x)):
-            t = self.list_tasks[tid]
-            icon = _STATUS_ICONS.get(t["status"], "?")
-            owner = f" — {t['owner']}" if t.get("owner") else ""
-            blocked = f" (blockedBy: {t['blockedBy']})" if t.get("blockedBy") else ""
-            lines.append(
-                f"[{icon}] #{tid}: {t['subject']}{owner}{blocked}"
-            )
-        return "\n".join(lines)
+            lines = []
+            for tid in sorted(self.list_tasks, key=_task_sort_key):
+                t = self.list_tasks[tid]
+                icon = _STATUS_ICONS.get(t["status"], "?")
+                owner = f" — {t['owner']}" if t.get("owner") else ""
+                blocked = f" (blockedBy: {t['blockedBy']})" if t.get("blockedBy") else ""
+                lines.append(
+                    f"[{icon}] #{tid}: {t['subject']}{owner}{blocked}"
+                )
+            return "\n".join(lines)
 
     # ── helpers ─────────────────────────────────────────
 
     def _format_task(self, task_id: str) -> str:
-        t = self.list_tasks.get(task_id)
-        if t is None:
-            return f"Error: task '{task_id}' not found."
-        icon = _STATUS_ICONS.get(t["status"], "?")
-        return (
-            f"[{icon}] #{task_id}: {t['subject']}\n"
-            f"  status: {t['status']}\n"
-            f"  blockedBy: {t.get('blockedBy', [])}\n"
-            f"  blocks: {t.get('blocks', [])}"
-        )
+        with self._lock:
+            t = self.list_tasks.get(task_id)
+            if t is None:
+                return f"Error: task '{task_id}' not found."
+            icon = _STATUS_ICONS.get(t["status"], "?")
+            return (
+                f"[{icon}] #{task_id}: {t['subject']}\n"
+                f"  status: {t['status']}\n"
+                f"  blockedBy: {t.get('blockedBy', [])}\n"
+                f"  blocks: {t.get('blocks', [])}"
+            )
 
 
 # ── singleton ───────────────────────────────────────────
@@ -282,13 +300,14 @@ def list_tasks() -> str:
     },
 )
 def check_task(task_id: str) -> str:
-    task = _manager.list_tasks.get(task_id)
-    if task is None:
-        return f"Error: task '{task_id}' not found."
-    if _manager.can_start(task_id):
-        return f"Task '{task_id}' ({task['subject']}) is ready to start."
-    blocked = [bid for bid in task.get("blockedBy", [])
-               if _manager.list_tasks.get(bid, {}).get("status") != "completed"]
-    if task["status"] != "pending":
-        return f"Task '{task_id}' is {task['status']}."
-    return f"Task '{task_id}' is blocked by: {blocked}"
+    with _manager._lock:
+        task = _manager.list_tasks.get(task_id)
+        if task is None:
+            return f"Error: task '{task_id}' not found."
+        if _manager.can_start(task_id):
+            return f"Task '{task_id}' ({task['subject']}) is ready to start."
+        blocked = [bid for bid in task.get("blockedBy", [])
+                   if _manager.list_tasks.get(bid, {}).get("status") != "completed"]
+        if task["status"] != "pending":
+            return f"Task '{task_id}' is {task['status']}."
+        return f"Task '{task_id}' is blocked by: {blocked}"

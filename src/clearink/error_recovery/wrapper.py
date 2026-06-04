@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any
 
-from .retry import call_with_retry, is_transient_error, RETRY_MAX_ATTEMPTS
+from .retry import call_with_retry
 from .overflow import is_context_overflow, recover, OVERFLOW_MAX_RETRIES
 from .truncation import should_retry, next_max_tokens, TRUNCATION_MAX_RETRIES
 from ..context_compact.config import CompactConfig
@@ -15,8 +15,8 @@ def safe_api_call(
     messages: list,
     tools: list,
     max_tokens: int,
-    thinking: dict,
-    extra_body: dict,
+    thinking: dict | None,
+    extra_body: dict | None,
     config: CompactConfig,
     hook_context: dict,
     compact_round: int,
@@ -36,15 +36,20 @@ def safe_api_call(
 
         while True:
             try:
+                kwargs = {
+                    "model": model,
+                    "system": system,
+                    "messages": messages,
+                    "tools": tools,
+                    "max_tokens": current_max_tokens,
+                }
+                if thinking:
+                    kwargs["thinking"] = thinking
+                if extra_body:
+                    kwargs["extra_body"] = extra_body
                 response = call_with_retry(
                     client,
-                    model=model,
-                    system=system,
-                    messages=messages,
-                    tools=tools,
-                    max_tokens=current_max_tokens,
-                    thinking=thinking,
-                    extra_body=extra_body,
+                    **kwargs,
                 )
                 break
             except Exception as e:

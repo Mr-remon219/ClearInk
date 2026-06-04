@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from clearink.tool.register import register_tool
 from ..config import SKILLS_DIR
 

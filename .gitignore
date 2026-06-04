@@ -20,4 +20,6 @@ data/team/*
 !data/team/.gitkeep
 data/.scheduled_tasks/*
 !data/.scheduled_tasks/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
 .claude

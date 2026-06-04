@@ -1,5 +1,4 @@
 from __future__ import annotations
-import warnings
 
 from .config import CompactConfig
 from .archive import write_task_output, write_l2_content
@@ -121,7 +120,7 @@ _COMPACT_PREFIX = "[Content compacted:"
 
 
 def layer2_placeholder_large(
-    messages: list, config: CompactConfig,
+    messages: list, config: CompactConfig, round_number: int,
 ) -> list:
     exchanges = segment_exchanges(messages)
     if not exchanges:
@@ -142,7 +141,8 @@ def layer2_placeholder_large(
                 if _should_replace(content, config):
                     try:
                         filename = write_l2_content(
-                            content, config.session_id, l2_idx, config.transcripts_dir,
+                            content, config.session_id, round_number, l2_idx,
+                            config.transcripts_dir,
                         )
                         msg["content"] = (
                             f"[Content compacted: {len(content)} chars "
@@ -163,7 +163,7 @@ def layer2_placeholder_large(
                         key = "text" if "text" in block else "content"
                         try:
                             filename = write_l2_content(
-                                block_text, config.session_id, l2_idx,
+                                block_text, config.session_id, round_number, l2_idx,
                                 config.transcripts_dir,
                             )
                             block[key] = (

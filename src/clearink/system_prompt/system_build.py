@@ -146,6 +146,8 @@ def get_system_prompt(sections: list[str] | None = None) -> str:
     key = (
         tuple(ctx["enabled_tools"]),
         ctx["workspace"],
+        ctx["memories"],
+        tuple(sections) if sections is not None else None,
     )
 
     key_str = str(hash(key))

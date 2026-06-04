@@ -1,7 +1,7 @@
 [project]
 name = "clearink"
 version = "0.1.0"
-description = "Add your description here"
+description = "An academic literature pathfinding agent — given a formula or paper, maps prerequisite dependencies with verifiable, section-annotated citations. Installable CLI with decorator-based tool registry, SKILL.md extension system, sub-agent delegation, and layered context compaction."
 readme = "README.md"
 authors = [
     { name = "Mr-remon219", email = "2609741281@qq.com" }
@@ -11,6 +11,7 @@ dependencies = [
     "anthropic>=0.104.1",
     "python-dotenv>=1.2.2",
     "python-frontmatter>=1.3.0",
+    "rich>=15.0.0",
 ]
 
 [project.scripts]

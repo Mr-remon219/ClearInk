@@ -1,11 +1,25 @@
 from __future__ import annotations
-from pathlib import Path
+import re
 import frontmatter
 
 from ..config import MEMORY_DIR
 
 _EXCLUDED = {"memory.md", "MEMORY.md"}
 _VALID_TYPES = {"user", "feedback", "project", "reference", "knowledge"}
+_MEMORY_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,127}$")
+
+
+def is_valid_memory_name(name: str) -> bool:
+    return bool(_MEMORY_NAME_RE.fullmatch(name))
+
+
+def _memory_path(name: str):
+    if not is_valid_memory_name(name):
+        raise ValueError(
+            "Memory name must be a kebab-case slug using lowercase letters, "
+            "numbers, and hyphens."
+        )
+    return MEMORY_DIR / f"{name}.md"
 
 
 def _parse_frontmatter(content: str) -> dict | None:
@@ -36,8 +50,11 @@ def list_memory_files() -> list[dict]:
         except Exception:
             continue
         meta = dict(post.metadata)
+        entry_name = meta.get("name", f.stem)
+        if not is_valid_memory_name(entry_name):
+            continue
         results.append({
-            "name": meta.get("name", f.stem),
+            "name": entry_name,
             "description": meta.get("description", ""),
             "type": meta.get("metadata", {}).get("type", "") if isinstance(meta.get("metadata"), dict) else meta.get("type", ""),
             "file_path": str(f),
@@ -46,7 +63,10 @@ def list_memory_files() -> list[dict]:
 
 
 def read_memory_file(name: str) -> str | None:
-    path = MEMORY_DIR / f"{name}.md"
+    try:
+        path = _memory_path(name)
+    except ValueError:
+        return None
     try:
         return path.read_text(encoding="utf-8")
     except (OSError, FileNotFoundError):
@@ -54,11 +74,11 @@ def read_memory_file(name: str) -> str | None:
 
 
 def write_memory_file(name: str, description: str, memory_type: str, content: str) -> str:
+    path = _memory_path(name)
     if memory_type not in _VALID_TYPES:
         raise ValueError(f"Invalid memory type: {memory_type!r}. Must be one of {sorted(_VALID_TYPES)}")
 
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    path = MEMORY_DIR / f"{name}.md"
 
     post = frontmatter.Post(
         content,
@@ -73,6 +93,7 @@ def write_memory_file(name: str, description: str, memory_type: str, content: st
 
 
 def _rebuild_index() -> None:
+    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     files = list_memory_files()
     lines = []
     for entry in files:
@@ -96,6 +117,8 @@ def consolidate_memories(new_items: list[dict]) -> str:
 
         if not item_name:
             continue
+        if not is_valid_memory_name(item_name):
+            continue
 
         if item_type not in _VALID_TYPES:
             item_type = "knowledge"
@@ -106,7 +129,7 @@ def consolidate_memories(new_items: list[dict]) -> str:
             added.append(item_name)
 
         MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-        path = MEMORY_DIR / f"{item_name}.md"
+        path = _memory_path(item_name)
         post = frontmatter.Post(
             item_content,
             name=item_name,

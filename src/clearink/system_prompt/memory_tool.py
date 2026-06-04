@@ -1,5 +1,5 @@
 from ..tool.register import register_tool
-from .memory_store import write_memory_file
+from .memory_store import is_valid_memory_name, write_memory_file
 
 _VALID_TYPES = {"user", "feedback", "project", "reference", "knowledge"}
 
@@ -38,9 +38,17 @@ _VALID_TYPES = {"user", "feedback", "project", "reference", "knowledge"}
     },
 )
 def save_memory(name: str, description: str, memory_type: str, content: str) -> str:
+    if not is_valid_memory_name(name):
+        return (
+            "Invalid memory name. Use a kebab-case slug with lowercase letters, "
+            "numbers, and hyphens only. Memory not saved."
+        )
     if memory_type not in _VALID_TYPES:
         return (
             f"Invalid memory_type: {memory_type!r}. "
             f"Must be one of {sorted(_VALID_TYPES)}. Memory not saved."
         )
-    return write_memory_file(name, description, memory_type, content)
+    try:
+        return write_memory_file(name, description, memory_type, content)
+    except ValueError as exc:
+        return f"{exc} Memory not saved."

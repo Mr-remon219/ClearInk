@@ -1,15 +1,24 @@
 from __future__ import annotations
 import os
+import re
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
 from ..config import ENV_PATH, MEMORY_DIR
-from .memory_store import read_memory_index, read_memory_file
+from ..message import extract_text_from_content, sanitize_messages_for_no_thinking
+from .memory_store import is_valid_memory_name, list_memory_files, read_memory_index, read_memory_file
 from .system_build import set_current_memories
 
 load_dotenv(ENV_PATH, override=True)
-_sub_client = Anthropic()
+_sub_client: Anthropic | None = None
 _sub_model = os.getenv("SUBAGENT_MODEL", "deepseek-v4-flash")
+
+
+def _get_sub_client() -> Anthropic:
+    global _sub_client
+    if _sub_client is None:
+        _sub_client = Anthropic()
+    return _sub_client
 
 
 def _last_user_message(messages: list) -> str:
@@ -50,7 +59,7 @@ def select_relevant_memories(messages: list) -> list[str]:
     )
 
     try:
-        response = _sub_client.messages.create(
+        response = _get_sub_client().messages.create(
             model=_sub_model,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
@@ -60,15 +69,34 @@ def select_relevant_memories(messages: list) -> list[str]:
     except Exception:
         return []
 
-    text = "".join(
-        b.text for b in response.content if b.type == "text"
-    ).strip().lower()
+    text = extract_text_from_content(response.content).strip().lower()
 
     if not text or text == "none":
         return []
 
-    names = [line.strip().strip("- ") for line in text.splitlines() if line.strip()]
-    return [n for n in names if n and n != "none"]
+    valid_names = {entry["name"] for entry in list_memory_files()}
+    names = []
+    for line in text.splitlines():
+        candidate = _normalize_memory_candidate(line)
+        if candidate and candidate in valid_names:
+            names.append(candidate)
+    return list(dict.fromkeys(names))
+
+
+def _normalize_memory_candidate(line: str) -> str:
+    candidate = line.strip().strip("- ").strip()
+    if not candidate or candidate.lower() == "none":
+        return ""
+
+    match = re.search(r"\[([a-z0-9][a-z0-9-]{0,127})\]", candidate)
+    if match:
+        candidate = match.group(1)
+    else:
+        candidate = candidate.split()[0].strip()
+        if candidate.endswith(".md"):
+            candidate = candidate[:-3]
+
+    return candidate if is_valid_memory_name(candidate) else ""
 
 
 def load_memories(messages: list) -> str:
@@ -126,17 +154,18 @@ def extract_memories(messages: list) -> list[dict]:
     )
 
     try:
-        response = _sub_client.messages.create(
+        clean_messages = sanitize_messages_for_no_thinking(messages)
+        response = _get_sub_client().messages.create(
             model=_sub_model,
             system=system_prompt,
-            messages=messages + [{"role": "user", "content": user_prompt}],
+            messages=clean_messages + [{"role": "user", "content": user_prompt}],
             max_tokens=2048,
             thinking={"type": "disabled"},
         )
     except Exception:
         return []
 
-    text = "".join(b.text for b in response.content if b.type == "text").strip()
+    text = extract_text_from_content(response.content).strip()
 
     if not text or text.lower() == "none":
         return []

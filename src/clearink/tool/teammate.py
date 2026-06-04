@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 from .register import register_tool, TOOL, TOOL_HANDLERS
 from ..config import ENV_PATH
+from ..message import content_block_to_dict
 
 load_dotenv(ENV_PATH, override=True)
 
@@ -17,6 +18,7 @@ _SUB_MODEL = os.getenv("SUBAGENT_MODEL", "deepseek-v4-flash")
 _EXCLUDED_TOOLS = {"spawn_teammate", "schedule_cron", "cancel_scheduled_job"}
 
 _active_teammates: dict[str, threading.Event] = {}  # name → stop_event
+_active_lock = threading.RLock()
 
 
 # ── Message bus ───────────────────────────────────────────
@@ -26,35 +28,38 @@ class MessageBus:
         self.base_dir = base_dir or (
             Path(__file__).resolve().parents[3] / "data" / "team"
         )
+        self._lock = threading.RLock()
 
     def inbox_path(self, name: str) -> Path:
         return self.base_dir / f"{name}_inbox.jsonl"
 
     def write(self, name: str, message: dict) -> None:
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-        msg = dict(message)
-        msg["timestamp"] = time.time()
-        with open(self.inbox_path(name), "a", encoding="utf-8") as f:
-            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        with self._lock:
+            self.base_dir.mkdir(parents=True, exist_ok=True)
+            msg = dict(message)
+            msg["timestamp"] = time.time()
+            with open(self.inbox_path(name), "a", encoding="utf-8") as f:
+                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
     def read_and_clear(self, name: str) -> list[dict]:
-        path = self.inbox_path(name)
-        if not path.exists():
-            return []
-        try:
-            lines = path.read_text(encoding="utf-8").strip().splitlines()
-        except OSError:
-            return []
-        messages = []
-        for line in lines:
-            if not line.strip():
-                continue
+        with self._lock:
+            path = self.inbox_path(name)
+            if not path.exists():
+                return []
             try:
-                messages.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-        path.write_text("", encoding="utf-8")
-        return messages
+                lines = path.read_text(encoding="utf-8").strip().splitlines()
+            except OSError:
+                return []
+            messages = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    messages.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            path.write_text("", encoding="utf-8")
+            return messages
 
     def collect_for_lead(self) -> list[dict]:
         msgs = self.read_and_clear("lead")
@@ -85,6 +90,7 @@ def _get_teammate_tools() -> tuple[list[dict], dict]:
 
 def _run_teammate_turn(
     name: str,
+    role: str,
     messages: list[dict],
     max_turns: int = 5,
 ) -> str:
@@ -97,6 +103,7 @@ def _run_teammate_turn(
             response = client.messages.create(
                 model=_SUB_MODEL,
                 system=f"You are {name}, a specialized AI teammate. "
+                       f"Role: {role}. "
                        f"Work on the assigned task and report back when done. "
                        f"Be concise and focused.",
                 messages=messages,
@@ -125,7 +132,7 @@ def _run_teammate_turn(
                     result = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                 except Exception as e:
                     result = f"Error: {e}"
-                messages.append({"role": "assistant", "content": [block]})
+                messages.append({"role": "assistant", "content": [content_block_to_dict(block)]})
                 messages.append({
                     "role": "user",
                     "content": [{
@@ -141,7 +148,8 @@ def _run_teammate_turn(
 # ── Idle loop ─────────────────────────────────────────────
 
 def _teammate_idle_loop(name: str, role: str, prompt: str) -> None:
-    stop_event = _active_teammates.get(name)
+    with _active_lock:
+        stop_event = _active_teammates.get(name)
     if stop_event is None:
         return
 
@@ -151,7 +159,7 @@ def _teammate_idle_loop(name: str, role: str, prompt: str) -> None:
     while not stop_event.is_set():
         msgs = _bus.read_and_clear(name)
         if msgs:
-            result = _run_teammate_turn(name, msgs)
+            result = _run_teammate_turn(name, role, msgs)
             _bus.write("lead", {
                 "role": "assistant",
                 "content": result,
@@ -187,11 +195,11 @@ def _teammate_idle_loop(name: str, role: str, prompt: str) -> None:
     },
 )
 def spawn_teammate_thread(name: str, role: str, prompt: str) -> str:
-    if name in _active_teammates:
-        return f"Error: teammate '{name}' already exists. Names must be unique."
-
-    stop_event = threading.Event()
-    _active_teammates[name] = stop_event
+    with _active_lock:
+        if name in _active_teammates:
+            return f"Error: teammate '{name}' already exists. Names must be unique."
+        stop_event = threading.Event()
+        _active_teammates[name] = stop_event
 
     thread = threading.Thread(
         target=_teammate_idle_loop,
@@ -227,8 +235,10 @@ def spawn_teammate_thread(name: str, role: str, prompt: str) -> str:
     },
 )
 def send_to_teammate(name: str, message: str) -> str:
-    if name not in _active_teammates:
-        return f"Error: no teammate named '{name}'. Active teammates: {list(_active_teammates)}"
+    with _active_lock:
+        active_names = list(_active_teammates)
+        if name not in _active_teammates:
+            return f"Error: no teammate named '{name}'. Active teammates: {active_names}"
 
     _bus.write(name, {"role": "user", "content": message})
     return f"Message sent to teammate '{name}'."
@@ -243,6 +253,16 @@ def send_to_teammate(name: str, message: str) -> str:
         "required": [],
     },
 )
+def list_teammates() -> str:
+    with _active_lock:
+        active_names = list(_active_teammates)
+    if not active_names:
+        return "(no active teammates)"
+    return "Active teammates:\n" + "\n".join(
+        f"  - {name}" for name in active_names
+    )
+
+
 @register_tool(
     name="stop_teammate",
     description="Stop and remove a teammate by name.",
@@ -255,19 +275,12 @@ def send_to_teammate(name: str, message: str) -> str:
     },
 )
 def stop_teammate(name: str) -> str:
-    if name not in _active_teammates:
+    with _active_lock:
+        stop_event = _active_teammates.pop(name, None)
+    if stop_event is None:
         return f"Error: no teammate named '{name}'."
-    _active_teammates[name].set()
-    del _active_teammates[name]
+    stop_event.set()
     return f"Teammate '{name}' stopped."
-
-
-def list_teammates() -> str:
-    if not _active_teammates:
-        return "(no active teammates)"
-    return "Active teammates:\n" + "\n".join(
-        f"  - {name}" for name in _active_teammates
-    )
 
 
 # ── Lead inbox collection ─────────────────────────────────

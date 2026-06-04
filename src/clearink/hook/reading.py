@@ -2,8 +2,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from clearink.config import WORK_DIR
-
 from .hook import hook_context, register_hook
 
 _PAPER_EXTENSIONS = {".pdf", ".txt", ".md"}
@@ -31,7 +29,7 @@ _CITATION_REMINDER = (
     "Present ONLY fields returned by the BibTeX output.]"
 )
 
-_JOURNAL_PATH = WORK_DIR / "reading-journal.md"
+_JOURNAL_PATH = Path(__file__).resolve().parents[3] / "data" / "logs" / "reading-journal.md"
 
 
 def _looks_like_paper(file_path: str) -> bool:
@@ -96,9 +94,11 @@ def detect_citation_request(context: dict) -> None:
         return
 
     lower = content.lower()
+    ctx = context.setdefault("hook_context", hook_context)
     if any(trigger in lower for trigger in _CITATION_TRIGGERS):
-        ctx = context.setdefault("hook_context", hook_context)
         ctx["citation_requested"] = True
+    else:
+        ctx["citation_requested"] = False
 
 
 @register_hook("userpromptsubmit", name="suggest_citation_tool", priority=50)
@@ -160,6 +160,7 @@ def log_turn_to_journal(context: dict) -> None:
         return
 
     entry = _format_journal_entry(context)
+    _JOURNAL_PATH.parent.mkdir(parents=True, exist_ok=True)
     header = "# Reading Session Journal\n\n" if not _JOURNAL_PATH.exists() else ""
 
     with open(_JOURNAL_PATH, "a" if _JOURNAL_PATH.exists() else "w", encoding="utf-8") as f:

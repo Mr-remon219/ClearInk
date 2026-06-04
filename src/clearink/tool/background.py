@@ -23,6 +23,15 @@ _SLOW_KEYWORDS = {
     "python -m pip", "python3 -m pip",
 }
 
+_RUNTIME_CONTROL_KEYS = {"run_in_background"}
+
+
+def strip_runtime_control_args(tool_input: dict) -> dict:
+    return {
+        k: v for k, v in dict(tool_input).items()
+        if k not in _RUNTIME_CONTROL_KEYS
+    }
+
 
 def is_slow_operation(tool_name: str, tool_input: dict) -> bool:
     if tool_name == "spawn_subagent":
@@ -63,7 +72,7 @@ def start_background_task(
         background_tasks[task_id] = {
             "id": task_id,
             "tool_name": tool_name,
-            "tool_input": tool_input,
+            "tool_input": strip_runtime_control_args(tool_input),
             "status": "running",
             "started_at": time.time(),
         }
@@ -85,7 +94,7 @@ def _run_and_store(
     handler,
 ) -> None:
     try:
-        result = handler(**tool_input)
+        result = handler(**strip_runtime_control_args(tool_input))
     except Exception as e:
         result = f"Error: {e}"
 

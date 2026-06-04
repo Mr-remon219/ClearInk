@@ -1,6 +1,9 @@
+import threading
+
 from .register import register_tool
 
 CURRENT_TODOS: list[dict] = []
+_TODO_LOCK = threading.RLock()
 
 _STATUS_ICONS = {
     "pending": " ",
@@ -10,18 +13,20 @@ _STATUS_ICONS = {
 
 
 def get_todos() -> list[dict]:
-    return CURRENT_TODOS
+    with _TODO_LOCK:
+        return [item.copy() for item in CURRENT_TODOS]
 
 
 def _format_todos() -> str:
-    if not CURRENT_TODOS:
-        return "(no todos)"
-    lines = []
-    for i, item in enumerate(CURRENT_TODOS, 1):
-        icon = _STATUS_ICONS.get(item.get("status", "pending"), " ")
-        content = item.get("content", "")
-        lines.append(f"[{icon}] #{i}: {content}")
-    return "\n".join(lines)
+    with _TODO_LOCK:
+        if not CURRENT_TODOS:
+            return "(no todos)"
+        lines = []
+        for i, item in enumerate(CURRENT_TODOS, 1):
+            icon = _STATUS_ICONS.get(item.get("status", "pending"), " ")
+            content = item.get("content", "")
+            lines.append(f"[{icon}] #{i}: {content}")
+        return "\n".join(lines)
 
 
 @register_tool(
@@ -60,16 +65,17 @@ def _format_todos() -> str:
 def todo_write(todos: list[dict], merge: bool = True) -> str:
     global CURRENT_TODOS
 
-    if not merge:
-        CURRENT_TODOS = list(todos)
+    with _TODO_LOCK:
+        if not merge:
+            CURRENT_TODOS = [item.copy() for item in todos]
+            return _format_todos()
+
+        for item in todos:
+            item_id = item.get("id")
+            existing = next((t for t in CURRENT_TODOS if t.get("id") == item_id), None)
+            if existing:
+                existing.update(item)
+            else:
+                CURRENT_TODOS.append(item.copy())
+
         return _format_todos()
-
-    for item in todos:
-        item_id = item.get("id")
-        existing = next((t for t in CURRENT_TODOS if t.get("id") == item_id), None)
-        if existing:
-            existing.update(item)
-        else:
-            CURRENT_TODOS.append(item.copy())
-
-    return _format_todos()

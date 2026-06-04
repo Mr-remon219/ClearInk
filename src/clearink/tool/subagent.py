@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 from .register import register_tool, TOOL as ALL_TOOLS, TOOL_HANDLERS
 from ..config import ENV_PATH
+from ..message import content_block_to_dict
 
 load_dotenv(ENV_PATH, override=True)
 
@@ -61,7 +62,7 @@ def spawn_subagent(prompt: str) -> str:
                     result = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                 except Exception as e:
                     result = f"Error: {e}"
-                messages.append({"role": "assistant", "content": [block]})
+                messages.append({"role": "assistant", "content": [content_block_to_dict(block)]})
                 messages.append({
                     "role": "user",
                     "content": [{

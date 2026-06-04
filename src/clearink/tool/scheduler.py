@@ -43,21 +43,38 @@ scheduled_jobs: dict[str, CronJob] = {}
 _fire_queue: Queue = Queue()
 _agent_busy: bool = False
 _agent_loop_fn: Callable | None = None
-_lock = threading.Lock()
+_lock = threading.RLock()
+_threads_lock = threading.Lock()
+_threads_started = False
 
 
 def set_busy(busy: bool) -> None:
     global _agent_busy
-    _agent_busy = busy
+    with _lock:
+        _agent_busy = busy
 
 
 def is_busy() -> bool:
-    return _agent_busy
+    with _lock:
+        return _agent_busy
 
 
 def set_agent_loop(fn: Callable) -> None:
     global _agent_loop_fn
-    _agent_loop_fn = fn
+    with _lock:
+        _agent_loop_fn = fn
+    ensure_scheduler_started()
+
+
+def ensure_scheduler_started() -> None:
+    global _threads_started
+    with _threads_lock:
+        if _threads_started:
+            return
+        _load_jobs()
+        threading.Thread(target=cron_scheduler_loop, daemon=True).start()
+        threading.Thread(target=queue_processor_loop, daemon=True).start()
+        _threads_started = True
 
 
 # ── Cron matching ─────────────────────────────────────────
@@ -122,10 +139,10 @@ def _load_jobs() -> None:
 def cron_scheduler_loop() -> None:
     while True:
         now = datetime.now()
+        should_save = False
         with _lock:
             jobs = list(scheduled_jobs.values())
-        for job in jobs:
-            try:
+            for job in jobs:
                 if not job.enabled:
                     continue
                 if not job.recurring and job.last_fired is not None:
@@ -139,19 +156,22 @@ def cron_scheduler_loop() -> None:
                     job.last_fired_minute = current_minute
                     if not job.recurring:
                         job.enabled = False
-                        _save_jobs()
-            except Exception:
-                pass
+                        should_save = True
+        if should_save:
+            _save_jobs()
         time.sleep(30)
 
 
 def queue_processor_loop() -> None:
     while True:
-        if not _fire_queue.empty() and not is_busy() and _agent_loop_fn is not None:
+        with _lock:
+            agent_loop_fn = _agent_loop_fn
+            can_run = not _agent_busy and agent_loop_fn is not None
+        if not _fire_queue.empty() and can_run:
             job = _fire_queue.get()
             set_busy(True)
             try:
-                _agent_loop_fn([
+                agent_loop_fn([
                     {"role": "user", "content": f"[Scheduled: {job.id}] {job.prompt}"},
                 ])
             except Exception:
@@ -198,16 +218,18 @@ def schedule_cron(
     recurring: bool = True,
     durable: bool = True,
 ) -> str:
+    ensure_scheduler_started()
     fields = cron.strip().split()
     if len(fields) != 5:
         return f"Error: cron expression must have 5 fields, got {len(fields)}: {cron!r}"
 
-    for i, field in enumerate(fields):
+    bounds = [(0, 59), (0, 23), (1, 31), (1, 12), (0, 6)]
+    for i, cron_field in enumerate(fields):
         try:
-            _validate_cron_field(field)
+            _validate_cron_field(cron_field, *bounds[i])
         except ValueError as e:
             field_names = ["minute", "hour", "dom", "month", "dow"]
-            return f"Error: invalid cron field '{field_names[i]}' ({field}): {e}"
+            return f"Error: invalid cron field '{field_names[i]}' ({cron_field}): {e}"
 
     job_id = uuid.uuid4().hex[:12]
     job = CronJob(
@@ -233,20 +255,31 @@ def schedule_cron(
     )
 
 
-def _validate_cron_field(field: str) -> None:
+def _validate_cron_field(field: str, min_value: int, max_value: int) -> None:
     if field == "*":
         return
     if field.startswith("*/"):
-        int(field[2:])
+        step = int(field[2:])
+        if step <= 0:
+            raise ValueError("step must be greater than zero")
         return
     for part in field.split(","):
         part = part.strip()
         if "-" in part:
             lo, hi = part.split("-", 1)
-            int(lo)
-            int(hi)
+            lo_i = int(lo)
+            hi_i = int(hi)
+            if lo_i > hi_i:
+                raise ValueError("range start must be <= range end")
+            _validate_value(lo_i, min_value, max_value)
+            _validate_value(hi_i, min_value, max_value)
         else:
-            int(part)
+            _validate_value(int(part), min_value, max_value)
+
+
+def _validate_value(value: int, min_value: int, max_value: int) -> None:
+    if value < min_value or value > max_value:
+        raise ValueError(f"value must be between {min_value} and {max_value}")
 
 
 @register_tool(
@@ -259,6 +292,7 @@ def _validate_cron_field(field: str) -> None:
     },
 )
 def list_scheduled_jobs() -> str:
+    ensure_scheduler_started()
     with _lock:
         if not scheduled_jobs:
             return "(no scheduled jobs)"
@@ -295,6 +329,7 @@ def list_scheduled_jobs() -> str:
     },
 )
 def cancel_scheduled_job(job_id: str) -> str:
+    ensure_scheduler_started()
     with _lock:
         job = scheduled_jobs.pop(job_id, None)
     if job is None:
@@ -303,8 +338,3 @@ def cancel_scheduled_job(job_id: str) -> str:
         _save_jobs()
     return f"Job {job_id} cancelled: {job.cron} — {job.prompt[:80]}"
 
-
-# ── Module init ───────────────────────────────────────────
-_load_jobs()
-threading.Thread(target=cron_scheduler_loop, daemon=True).start()
-threading.Thread(target=queue_processor_loop, daemon=True).start()
