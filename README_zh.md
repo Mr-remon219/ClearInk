@@ -176,7 +176,13 @@ uv sync
 
 ### 配置
 
-创建 `data/environment/.env`：
+从模板创建 `data/environment/.env`：
+
+```bash
+cp data/environment/.env.sample data/environment/.env
+```
+
+然后编辑 `.env` 填入你实际的 key 和端点：
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...

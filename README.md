@@ -176,7 +176,13 @@ uv sync
 
 ### Configure
 
-Create `data/environment/.env`:
+Create `data/environment/.env` from the template:
+
+```bash
+cp data/environment/.env.sample data/environment/.env
+```
+
+Then edit `.env` and fill in your actual key and endpoint:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
