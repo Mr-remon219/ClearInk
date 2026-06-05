@@ -15,13 +15,21 @@
 
 ---
 
-**ClearInk** is a dual-mode academic reading agent. In **Mode 1** (default) you give it a paper title and a formula you do not understand; it decomposes the formula, verifies citation metadata through Google Scholar, and returns a prerequisite reading path with specific section, paragraph, or equation references. In **Mode 2** you ask a question about a paper's content; it gives a brief answer, then recommends prerequisite papers for deeper understanding. Modes are switchable mid-session with ``/mode 1`` or ``/mode 2``. **Step mode** (``/step``) breaks responses into sequential stages — overall explanation → paper route → per-paper details — letting you digest each step before continuing with ``/next`` or starting a new round with ``/end``.
+**ClearInk** is a dual-mode academic reading agent.
+
+**Mode 1** (default) — you give it a paper title and a formula you don't understand. It decomposes the formula, verifies citation metadata through Google Scholar, and returns a prerequisite reading path with specific section, paragraph, or equation references.
+
+**Mode 2** — you ask a question about a paper's content. It gives a brief answer, then recommends prerequisite papers for deeper understanding.
+
+Switch modes anytime with ``/mode 1`` or ``/mode 2``.
+
+**Step mode** (``/step``) breaks responses into stages — overall explanation → paper route → per-paper details — so you can digest each step before continuing with ``/next`` or starting fresh with ``/end``.
 
 ClearInk ships with a Rich terminal interface — a lemon pixel-art welcome screen, mode-aware prompts, spinner feedback, and Markdown rendering — styled after the clean CLI aesthetics of modern developer tools.
 
-Under the hood, ClearInk is also a compact Python agent runtime: an Anthropic-compatible CLI loop, decorator-registered tools, ``SKILL.md`` extensions, persistent memory, hooks, sub-agents, a full teammate system (protocol communication, idle polling, task claiming, git worktree isolation), MCP client for academic search servers (ModelScope, Semantic Scholar / Crossref), cron scheduling, DAG tasks, context compaction, error recovery, and a Django-friendly API layer for web backends.
+Under the hood, ClearInk is built on a compact Python agent runtime that includes: an Anthropic-compatible CLI loop, decorator-registered tools, ``SKILL.md`` skill extensions, persistent memory, hooks, sub-agents, a teammate system with protocol communication and git worktree isolation, MCP client for academic search (ModelScope, Semantic Scholar / Crossref), cron scheduling, context compaction, error recovery, and a Django-friendly API bridge.
 
-The project is currently **alpha**. The citation policy is strict by design: paper metadata must come from `scholar --bibtex` or `scholar cite`; missing fields should be reported as unavailable, not guessed. Section-level annotations are only as strong as the retrieved evidence available to the agent.
+The project is currently in **alpha**. The citation policy is strict by design: paper metadata must come from `scholar --bibtex` or `scholar cite`; missing fields should be reported as unavailable, not guessed. Section-level annotations are only as strong as the retrieved evidence available to the agent.
 
 ---
 
@@ -35,32 +43,32 @@ D(X+Y) = D(X) + D(Y) + 2Cov(X,Y)
 
 the paper may assume that you already know the covariance expansion, the notation conventions, and the proof context. Following that trail manually can turn into hours of citation chasing. General-purpose LLMs often fill the gaps from memory and produce plausible but wrong titles, years, authors, or page references.
 
-ClearInk treats paper reading as a dependency problem:
-
-1. identify the pieces of a formula or concept,
-2. search for the prerequisite papers or explanations,
-3. rank those sources by dependency depth,
-4. present a reading path with verified metadata and explicit uncertainty.
+ClearInk treats paper reading as a dependency problem — identify the pieces of a formula, search for the prerequisite papers that introduced or explained them, rank those sources by dependency depth, and present a reading path with verified metadata and explicit uncertainty.
 
 ---
 
-## What Is Implemented
+## What's Included
 
-ClearInk currently provides:
+### Interaction
 
-- **Rich terminal interface** — pixel-art lemon welcome screen, mode-aware input prompts, spinner feedback, and rendered Markdown output via the `rich` library.
-- **Dual-mode interaction** — `/mode 1` for formula dependency analysis, `/mode 2` for paper content Q&A. Switchable at any prompt without restarting the session.
-- **Interactive CLI workflow** — prompts for a paper title and a mode-dependent second input (formula or question), then supports follow-up questions in the same session.
-- **Prompt-assembled academic agent** — builds the system prompt from `data/system_prompts/base.md`, `guidelines.md`, available skills, memories, and runtime environment.
-- **Google Scholar skill** — loads `data/skills/google_scholar/SKILL.md` when academic search or citation work is needed, with a hard rule to verify metadata through the `scholar` CLI.
-- **29 registered tool schemas** — shell execution, file reading, glob search, skills, memory, todos, DAG tasks, background tasks, sub-agents, teammate management — spawn, communicate, protocol-based shutdown — MCP server connection, git worktree management, and cron jobs.
-- **MCP academic search** — connect to ModelScope and Semantic Scholar / Crossref MCP servers for verified paper search, metadata retrieval, and topic-based discovery.
-- **Step-by-step output mode** — ``/step`` enables staged responses; ``/next`` advances, ``/end`` starts a new round, ``/nostep`` disables. Works in both Mode 1 and Mode 2.
-- **Teammate system** — four-step protocol communication (request/response matching with type-safety), idle polling with autonomous task claiming, and git worktree isolation for parallel file operations.
-- **Reading hooks + audit log** — detect citation-related prompts, inject citation-verification reminders, track accessed paper-like files, write a local ``data/logs/reading-journal.md``, and log every system event to ``data/logs/audit.jsonl``.
-- **Persistent memory** — stores project, user, feedback, reference, and knowledge memories as Markdown files with YAML frontmatter.
-- **Context compaction** — trims middle exchanges, archives large tool outputs, replaces large message bodies with placeholders, and summarizes long sessions.
-- **Error recovery** — retries transient API errors, reacts to context overflow through compaction, and expands `max_tokens` for truncated outputs.
+- **Rich terminal interface** — pixel-art lemon welcome screen, mode-aware prompts, spinner feedback, and Markdown rendering via `rich`.
+- **Dual-mode interaction** — ``/mode 1`` for formula dependency analysis, ``/mode 2`` for paper Q&A. Switch anytime without restarting.
+- **Step-by-step output** — ``/step`` breaks responses into stages; ``/next`` continues, ``/end`` starts a new round.
+
+### Toolchain
+
+- **Google Scholar skill** — on-demand citation lookup with hard rules to verify metadata through the `scholar` CLI.
+- **MCP academic search** — connect to ModelScope, Semantic Scholar, and Crossref for verified paper search and metadata retrieval.
+- **29 registered tools** — shell execution, file I/O, glob search, skills, memory, todos, DAG tasks, background tasks, sub-agents, teammate management, MCP client, git worktree management, and cron jobs.
+
+### Agent Runtime
+
+- **System prompt assembly** — builds prompts from `data/system_prompts/` templates, available skills, memories, and runtime environment.
+- **Teammate system** — four-stage protocol communication with idle polling, autonomous task claiming, and git worktree isolation.
+- **Reading hooks & audit log** — citation-verification reminders, paper-access tracking, and JSONL audit logging.
+- **Persistent memory** — Markdown + YAML frontmatter store for user preferences and project knowledge.
+- **Context compaction** — L1–L4 compression: trim, placeholder, archive, and summarize for long-running sessions.
+- **Error recovery** — retries for transient API errors, context-overflow handling, and truncation recovery.
 
 ---
 
@@ -126,7 +134,7 @@ Formula number or description: scaled dot-product attention, Attention(Q,K,V) = 
 
 - **Brief answer first** — the agent gives a concise 2-4 sentence answer to the user's question before listing papers.
 - **Prerequisite reading** — then recommends papers that deepen understanding of the topic, with section-level annotations.
-- Same citation verification and anti-hallucination rules apply.
+- **Citation discipline** — same citation verification and anti-hallucination rules from Mode 1 apply.
 
 Example Mode 2 prompt:
 
@@ -141,11 +149,11 @@ Your question about the paper: Why does BERT use layer normalization before the 
 
 ## Runtime Features
 
-| Component | Role | Reusable For |
+| Component | Role | Use Cases |
 |-----------|------|-------------|
-| `@register_tool` | Decorator-based tool registry with JSON Schema-style tool definitions | Extensible agent tooling |
+| `@register_tool` | Decorator-based tool registry with JSON Schema-style tool definitions | Building extensible agent tools |
 | `SKILL.md` loader | Dynamic skill discovery from `data/skills/*/SKILL.md` frontmatter | Domain-specific behavior without code changes |
-| Sub-agent delegation | Flash-model sub-agent with thinking disabled and up to 5 tool turns | Cheap parallel lookup or file-reading tasks |
+| Sub-agent delegation | Lightweight model sub-agent with thinking disabled and up to 5 tool turns | Cheap parallel lookup or file-reading tasks |
 | Teammate system | Background threads with protocol communication, idle polling, autonomous task claiming, and git worktree isolation | Multi-agent research workflows |
 | MCP Client | Stdio JSON-RPC client; connect to external tool servers and dynamically register their tools | Academic search (ModelScope, Semantic Scholar, Crossref) |
 | DAG task system | Dependency-resolved task graph with claim/complete/unblock flow | Research planning and workflow tracking |
@@ -159,14 +167,9 @@ Your question about the paper: Why does BERT use layer normalization before the 
 
 ## Quick Start
 
-### Prerequisites
+### Step 1: Install
 
-- Python 3.14+
-- [uv](https://docs.astral.sh/uv/)
-- An Anthropic-compatible API key and endpoint
-- Optional but important for citation verification: the `scholar` CLI on `PATH`
-
-### Install
+**Prerequisites:** Python 3.14+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/Mr-remon219/ClearInk.git
@@ -174,57 +177,36 @@ cd ClearInk
 uv sync
 ```
 
-### Configure
+### Step 2: Configure
 
-Create `data/environment/.env` from the template:
+Copy the environment template and edit it with your own values:
 
 ```bash
+# macOS / Linux
 cp data/environment/.env.sample data/environment/.env
+
+# Windows (Command Prompt)
+copy data\environment\.env.sample data\environment\.env
 ```
 
-Then edit `.env` and fill in your actual key and endpoint:
+Open `data/environment/.env` in any text editor. The only three fields you **must** fill in:
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-MODEL=claude-opus-4-1-20250805
-
-# DeepSeek-compatible example:
-# ANTHROPIC_BASE_URL=https://api.deepseek.example
-# MODEL=deepseek-v4-pro
-
-# Optional thinking controls
-THINKING_TYPE=enabled
-THINKING_BUDGET=4096
-
-# Optional DeepSeek-compatible effort field (forwarded only for DeepSeek endpoints)
-THINKING_EFFORT=max
-
-# Optional cheaper model for sub-agents and teammates
-SUBAGENT_MODEL=deepseek-v4-flash
+ANTHROPIC_API_KEY=<your-api-key>
+ANTHROPIC_BASE_URL=<your-api-endpoint>
+MODEL=<your-model-name>
 ```
 
-Runtime state is stored under `data/` by default. For packaged or Django
-deployments, set `CLEARINK_DATA_DIR` in the process environment before startup
-to keep `.env`, logs, memories, tasks, MCP config, and teammate mailboxes in one
-explicit directory. If the Django process starts outside the Git repository
-that ClearInk should manage, set `CLEARINK_REPO_ROOT` to that repository path so
-worktree operations run against the intended repo.
+All other variables (thinking controls, sub-agent model, path overrides) are
+optional — their defaults and descriptions are documented inside `.env.sample`.
 
-If you use the Google Scholar skill, also make sure `scholar` is installed and authenticated:
-
-```bash
-command -v scholar
-scholar auth
-```
-
-### Run
+### Step 3: Run
 
 ```bash
 uv run clearink
 ```
 
-The CLI displays a lemon pixel-art welcome screen, shows the current mode, then prompts:
+If you see a lemon pixel-art welcome screen, you're all set. From there:
 
 ```text
   Mode 1 · Formula Analysis  (/mode 2 to switch)
@@ -235,7 +217,23 @@ Formula number or description: scaled dot-product attention formula
   Analyzing...
 ```
 
-After the first answer, use the follow-up prompt for refinements, switch modes with `/mode 1` or `/mode 2`, or exit with `/exit`.
+After the first answer you can ask follow-up questions, switch modes with
+`/mode 1` or `/mode 2`, or exit with `/exit`.
+
+### Optional Setup
+
+**Google Scholar (citation verification):**
+
+```bash
+command -v scholar
+scholar auth
+```
+
+**Advanced — custom data paths:**
+Set `CLEARINK_DATA_DIR` before startup to relocate `.env`, logs, memories,
+tasks, and MCP config into a single explicit directory. Set
+`CLEARINK_REPO_ROOT` when the working directory differs from the Git repository
+that ClearInk should manage (required for worktree operations).
 
 ---
 
@@ -248,7 +246,9 @@ ClearInk/
 ├── README_zh.md
 ├── LICENSE
 ├── data/
-│   ├── environment/.env        runtime API configuration, not committed
+│   ├── environment/
+│   │   ├── .env.sample          configuration template (commit-safe)
+│   │   └── .env                 runtime API configuration, not committed
 │   ├── skills/
 │   │   └── google_scholar/
 │   │       └── SKILL.md
@@ -289,7 +289,7 @@ ClearInk/
         └── output_format.py    LaTeX to plain-text conversion
 ```
 
-Some `data/` subdirectories are created at runtime and may not exist in a fresh clone.
+Some `data/` subdirectories are created at runtime and may not exist until the app runs for the first time.
 
 ---
 
@@ -316,7 +316,7 @@ def arxiv_search(query: str) -> str:
     return f"Results for: {query}"
 ```
 
-Import the module from `clearink.tool.__init__` or another imported module so the decorator runs during startup.
+Make sure this module is imported at startup so the decorator runs (for example, reference it in `clearink.tool.__init__`).
 
 ### Add a Skill
 
@@ -352,12 +352,11 @@ Valid hook points: ``userpromptsubmit``, ``pretooluse``, ``posttooluse``, ``stop
 
 ## Current Limits
 
-- Formula decomposition is LLM-guided. There is no deterministic formula parser yet.
-- Section, paragraph, and equation annotations require available source text or reliable retrieved evidence.
+- Formula decomposition is LLM-guided — there is no deterministic formula parser yet.
+- Section, paragraph, and equation annotations require accessible source text or reliable retrieved evidence.
 - The Google Scholar workflow depends on an external `scholar` CLI and its authentication state.
-- `run_bash` currently uses `shell=True`; do not expose this runtime to untrusted users without sandboxing.
-- The test suite covers core formatting, DeepSeek-compatible request parameters, API session workflows, hooks, MCP registration, scheduler behavior, worktree helpers, and integration flows.
-- Some multi-agent tools are experimental and need more coverage before production use.
+- `run_bash` currently uses `shell=True`; sandbox before exposing to untrusted users.
+- Some multi-agent features are experimental and need more testing before production use.
 
 ---
 
@@ -388,7 +387,7 @@ Contributions are welcome while the project is in alpha:
 
 1. Fork the repository.
 2. Create a feature branch.
-3. Keep changes focused and run `uv run --no-sync pytest` plus `uv run --no-sync ruff check .`.
+3. Keep changes focused — run `uv run --no-sync pytest` and `uv run --no-sync ruff check .` before submitting.
 4. Open a pull request with a short description of behavior and risk.
 
 Issues and discussions are tracked on [GitHub](https://github.com/Mr-remon219/ClearInk).
