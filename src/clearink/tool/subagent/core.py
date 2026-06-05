@@ -2,9 +2,9 @@ import os
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
-from .register import register_tool, TOOL as ALL_TOOLS, TOOL_HANDLERS
-from ..config import ENV_PATH
-from ..message import content_block_to_dict
+from ..register import register_tool, TOOL as ALL_TOOLS, TOOL_HANDLERS
+from ...config import ENV_PATH
+from ...message import content_block_to_dict
 
 load_dotenv(ENV_PATH, override=True)
 

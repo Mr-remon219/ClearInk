@@ -117,7 +117,7 @@ class ThinkingReplayTests(unittest.TestCase):
                 "strip_runtime_control_args",
                 side_effect=lambda args: args,
             ),
-            patch.object(main_module.teammate, "collect_teammate_messages", return_value=[]),
+            patch.object(main_module.team, "collect_teammate_messages", return_value=[]),
             patch.dict(
                 main_module.TOOL_HANDLERS,
                 {"lookup": lambda query: "tool answer"},

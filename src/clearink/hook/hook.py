@@ -2,10 +2,27 @@ from __future__ import annotations
 from typing import Any, Callable
 
 HOOKS: dict[str, list[dict]] = {
+    # ── Core agent hooks (existing) ────────────────────────
     "userpromptsubmit": [],
     "pretooluse": [],
     "posttooluse": [],
     "stop": [],
+    # ── Session hooks ──────────────────────────────────────
+    "session_created": [],
+    "session_destroyed": [],
+    # ── Mode hooks ─────────────────────────────────────────
+    "mode_switched": [],
+    "step_mode_changed": [],
+    # ── MCP hooks ──────────────────────────────────────────
+    "mcp_connected": [],
+    "mcp_disconnected": [],
+    # ── Teammate hooks ─────────────────────────────────────
+    "teammate_spawned": [],
+    "teammate_stopped": [],
+    # ── Task hooks ─────────────────────────────────────────
+    "task_lifecycle": [],
+    # ── API hooks ──────────────────────────────────────────
+    "api_request": [],
 }
 
 hook_context: dict[str, Any] = {
@@ -13,6 +30,10 @@ hook_context: dict[str, Any] = {
     "papers_accessed": [],
     "citation_requested": False,
     "session_log": [],
+    # Extended for new hook types
+    "active_session_id": None,
+    "active_mcp_servers": [],
+    "active_teammates": [],
 }
 
 _VALID_TYPES = frozenset(HOOKS.keys())
@@ -39,6 +60,7 @@ def register_hook(
 
 
 def run_hooks(hook_type: str, context: dict) -> dict:
+    context["_hook_type"] = hook_type
     for entry in HOOKS.get(hook_type, []):
         try:
             entry["fn"](context)

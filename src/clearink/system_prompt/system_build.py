@@ -4,11 +4,12 @@ from datetime import datetime
 import platform
 from typing import Callable
 
+from ..config import MEMORY_DIR, SYSTEM_PROMPTS_DIR
 from ..tool.skill import get_available_skills
 from ..tool.register import TOOL_HANDLERS
 
-_PROMPTS_DIR = Path(__file__).resolve().parents[3] / "data" / "system_prompts"
-_MEMORY_DIR = _PROMPTS_DIR / ".memory"
+_PROMPTS_DIR = SYSTEM_PROMPTS_DIR
+_MEMORY_DIR = MEMORY_DIR
 
 # ── Cache ──────────────────────────────────────────────────
 _last_key: str = ""

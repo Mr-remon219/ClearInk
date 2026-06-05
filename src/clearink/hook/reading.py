@@ -2,6 +2,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from clearink.config import LOGS_DIR
 from .hook import hook_context, register_hook
 
 _PAPER_EXTENSIONS = {".pdf", ".txt", ".md"}
@@ -29,7 +30,7 @@ _CITATION_REMINDER = (
     "Present ONLY fields returned by the BibTeX output.]"
 )
 
-_JOURNAL_PATH = Path(__file__).resolve().parents[3] / "data" / "logs" / "reading-journal.md"
+_JOURNAL_PATH = LOGS_DIR / "reading-journal.md"
 
 
 def _looks_like_paper(file_path: str) -> bool:

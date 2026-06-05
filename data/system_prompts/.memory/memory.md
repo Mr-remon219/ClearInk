@@ -1,3 +1,0 @@
-- [formula-kaiming-eq6-dependencies](formula-kaiming-eq6-dependencies.md) — Prerequisite papers for Eq 6 of He et al. 2015 (Kaiming initialization forward variance product)
-- [kaiming-eq6-derivation-details](kaiming-eq6-derivation-details.md) — Step-by-step derivation trace of Equation 6 from the extracted LaTeX source of He et al. 2015
-- [kaiming-eq6-prerequisite-reading-list](kaiming-eq6-prerequisite-reading-list.md) — Annotated reading order and section-level prerequisites for fully understanding Equation 6 of He et al. 2015 (Kaiming initialization)

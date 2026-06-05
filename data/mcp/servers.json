@@ -1,0 +1,18 @@
+{
+  "_comment": "MCP server configurations for ClearInk academic literature assistant.",
+  "_note": "Each key is a server name used with connect_mcp tool.",
+  "modelscope": {
+    "command": "uvx",
+    "args": ["modelscope-mcp-server"],
+    "env": {},
+    "enabled": true,
+    "description": "ModelScope official MCP Server — paper search (arXiv), model search, dataset discovery"
+  },
+  "academic": {
+    "command": "uv",
+    "args": ["run", "--directory", "data/mcp/servers/academic-search", "server.py"],
+    "env": {},
+    "enabled": true,
+    "description": "Academic Paper Search — Semantic Scholar + Crossref (search_papers, fetch_paper_details, search_by_topic)"
+  }
+}

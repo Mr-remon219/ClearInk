@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-_CLEARINK_DIR = Path(__file__).resolve().parents[3] / "data"
+from clearink.config import TASK_OUTPUTS_DIR, TRANSCRIPTS_DIR
 
 
 @dataclass
@@ -35,10 +35,10 @@ class CompactConfig:
 
     # Directories
     task_outputs_dir: Path = field(
-        default_factory=lambda: _CLEARINK_DIR / "task_outputs"
+        default_factory=lambda: TASK_OUTPUTS_DIR
     )
     transcripts_dir: Path = field(
-        default_factory=lambda: _CLEARINK_DIR / ".transcripts"
+        default_factory=lambda: TRANSCRIPTS_DIR
     )
 
     # Session

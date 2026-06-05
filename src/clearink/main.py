@@ -5,8 +5,10 @@ import os
 
 from .config import ENV_PATH
 from .tool.register import TOOL, TOOL_HANDLERS
-from .tool import basetool, skill, todo, subagent, task_system, background, scheduler, teammate  # noqa: F401 — registers tools
+from .tool import basetool, skill, todo, subagent, task_system, background, scheduler, team, mcp_client  # noqa: F401 — registers tools
+from .tool.mcp_client import assemble_tool_pool
 from .hook import run_hooks, hook_context
+from .hook import audit  # noqa: F401 — registers audit-log hooks on all types
 from .system_prompt.memory_load import load_memories, extract_memories
 from .system_prompt.memory_store import consolidate_memories
 from .system_prompt.system_build import get_system_prompt
@@ -113,12 +115,16 @@ def agent_loop(
         load_memories(messages)
 
         try:
+            # Merge MCP-discovered tools into the tool pool
+            mcp_tools, mcp_handlers = assemble_tool_pool()
+            all_tools = TOOL + mcp_tools
+
             response, messages, compact_round = safe_api_call(
                 _get_client(),
                 model=current_model,
                 system=get_system_prompt(),
                 messages=messages,
-                tools=TOOL,
+                tools=all_tools,
                 max_tokens=4096,
                 thinking=_build_thinking(),
                 extra_body=_build_extra_body(),
@@ -144,7 +150,7 @@ def agent_loop(
                 "hook_context": hook_context,
             })
             # Collect teammate messages before returning
-            for tm_msg in teammate.collect_teammate_messages():
+            for tm_msg in team.collect_teammate_messages():
                 messages.append(tm_msg)
 
             # Extract and consolidate memories from this session
@@ -184,7 +190,7 @@ def agent_loop(
                 "hook_context": hook_context,
             })
 
-            handler = TOOL_HANDLERS.get(tool_name)
+            handler = TOOL_HANDLERS.get(tool_name) or mcp_handlers.get(tool_name)
             try:
                 if handler and background.should_run_background(tool_name, tool_args):
                     result = background.start_background_task(

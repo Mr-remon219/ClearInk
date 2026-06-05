@@ -1,6 +1,6 @@
 import threading
 
-from .register import register_tool
+from ..register import register_tool
 
 CURRENT_TODOS: list[dict] = []
 _TODO_LOCK = threading.RLock()

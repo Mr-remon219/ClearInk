@@ -1,5 +1,5 @@
 <p align="center">
-  <samp>ClearInk</samp>
+  <a href="http://47.93.166.221:8080/"><samp>ClearInk</samp></a>
 </p>
 
 <p align="center">
@@ -15,11 +15,11 @@
 
 ---
 
-**ClearInk** is a dual-mode academic reading agent. In **Mode 1** (default) you give it a paper title and a formula you do not understand; it decomposes the formula, verifies citation metadata through Google Scholar, and returns a prerequisite reading path with specific section, paragraph, or equation references. In **Mode 2** you ask a question about a paper's content; it gives a brief answer, then recommends prerequisite papers for deeper understanding. Modes are switchable mid-session with `/mode 1` or `/mode 2`.
+**ClearInk** is a dual-mode academic reading agent. In **Mode 1** (default) you give it a paper title and a formula you do not understand; it decomposes the formula, verifies citation metadata through Google Scholar, and returns a prerequisite reading path with specific section, paragraph, or equation references. In **Mode 2** you ask a question about a paper's content; it gives a brief answer, then recommends prerequisite papers for deeper understanding. Modes are switchable mid-session with ``/mode 1`` or ``/mode 2``. **Step mode** (``/step``) breaks responses into sequential stages — overall explanation → paper route → per-paper details — letting you digest each step before continuing with ``/next`` or starting a new round with ``/end``.
 
 ClearInk ships with a Rich terminal interface — a lemon pixel-art welcome screen, mode-aware prompts, spinner feedback, and Markdown rendering — styled after the clean CLI aesthetics of modern developer tools.
 
-Under the hood, ClearInk is also a compact Python agent runtime: an Anthropic-compatible CLI loop, decorator-registered tools, `SKILL.md` extensions, persistent memory, hooks, sub-agents, teammate threads, cron scheduling, DAG tasks, context compaction, and error recovery.
+Under the hood, ClearInk is also a compact Python agent runtime: an Anthropic-compatible CLI loop, decorator-registered tools, ``SKILL.md`` extensions, persistent memory, hooks, sub-agents, a full teammate system (protocol communication, idle polling, task claiming, git worktree isolation), MCP client for academic search servers (ModelScope, Semantic Scholar / Crossref), cron scheduling, DAG tasks, context compaction, error recovery, and a Django-friendly API layer for web backends.
 
 The project is currently **alpha**. The citation policy is strict by design: paper metadata must come from `scholar --bibtex` or `scholar cite`; missing fields should be reported as unavailable, not guessed. Section-level annotations are only as strong as the retrieved evidence available to the agent.
 
@@ -53,8 +53,11 @@ ClearInk currently provides:
 - **Interactive CLI workflow** — prompts for a paper title and a mode-dependent second input (formula or question), then supports follow-up questions in the same session.
 - **Prompt-assembled academic agent** — builds the system prompt from `data/system_prompts/base.md`, `guidelines.md`, available skills, memories, and runtime environment.
 - **Google Scholar skill** — loads `data/skills/google_scholar/SKILL.md` when academic search or citation work is needed, with a hard rule to verify metadata through the `scholar` CLI.
-- **22 registered tool schemas** — shell execution, file reading, glob search, skills, memory, todos, DAG tasks, background tasks, sub-agents, teammate threads, and cron jobs.
-- **Reading hooks** — detect citation-related prompts, inject citation-verification reminders, track accessed paper-like files, and write a local `data/logs/reading-journal.md`.
+- **29 registered tool schemas** — shell execution, file reading, glob search, skills, memory, todos, DAG tasks, background tasks, sub-agents, teammate management — spawn, communicate, protocol-based shutdown — MCP server connection, git worktree management, and cron jobs.
+- **MCP academic search** — connect to ModelScope and Semantic Scholar / Crossref MCP servers for verified paper search, metadata retrieval, and topic-based discovery.
+- **Step-by-step output mode** — ``/step`` enables staged responses; ``/next`` advances, ``/end`` starts a new round, ``/nostep`` disables. Works in both Mode 1 and Mode 2.
+- **Teammate system** — four-step protocol communication (request/response matching with type-safety), idle polling with autonomous task claiming, and git worktree isolation for parallel file operations.
+- **Reading hooks + audit log** — detect citation-related prompts, inject citation-verification reminders, track accessed paper-like files, write a local ``data/logs/reading-journal.md``, and log every system event to ``data/logs/audit.jsonl``.
 - **Persistent memory** — stores project, user, feedback, reference, and knowledge memories as Markdown files with YAML frontmatter.
 - **Context compaction** — trims middle exchanges, archives large tool outputs, replaces large message bodies with placeholders, and summarizes long sessions.
 - **Error recovery** — retries transient API errors, reacts to context overflow through compaction, and expands `max_tokens` for truncated outputs.
@@ -77,7 +80,7 @@ ClearInk currently provides:
                +----------------+----------------+
                |                |                |
           Hook system      Memory system     Error recovery
-          4 hook points    frontmatter MD    retry/overflow/truncation
+          14 hook points   frontmatter MD    retry/overflow/truncation
                |                |                |
                +----------------+----------------+
                                 |
@@ -86,7 +89,7 @@ ClearInk currently provides:
         +-----------+-----------+-----------+-----------+
         |           |           |           |           |
     Tool registry  Skills   Sub-agents   Teammates   Scheduler
-    @register      SKILL.md  delegate     JSONL bus   cron
+    @register      SKILL.md  delegate     team/       cron
         |
   +-----+-----+-----+-----+-----+-----+
   |     |     |     |     |     |     |
@@ -143,11 +146,12 @@ Your question about the paper: Why does BERT use layer normalization before the 
 | `@register_tool` | Decorator-based tool registry with JSON Schema-style tool definitions | Extensible agent tooling |
 | `SKILL.md` loader | Dynamic skill discovery from `data/skills/*/SKILL.md` frontmatter | Domain-specific behavior without code changes |
 | Sub-agent delegation | Flash-model sub-agent with thinking disabled and up to 5 tool turns | Cheap parallel lookup or file-reading tasks |
-| Teammate message bus | Background teammate threads communicating through JSONL inboxes | Multi-agent collaboration experiments |
+| Teammate system | Background threads with protocol communication, idle polling, autonomous task claiming, and git worktree isolation | Multi-agent research workflows |
+| MCP Client | Stdio JSON-RPC client; connect to external tool servers and dynamically register their tools | Academic search (ModelScope, Semantic Scholar, Crossref) |
 | DAG task system | Dependency-resolved task graph with claim/complete/unblock flow | Research planning and workflow tracking |
 | Context compaction | L1-L4 compression for long conversations | Long-running sessions under token limits |
 | Error recovery | Retry, context overflow recovery, and truncation retry handling | More resilient API calls |
-| Hook system | `userpromptsubmit`, `pretooluse`, `posttooluse`, and `stop` hooks | Logging, policy reminders, and reading context |
+| Hook system | 14 hook points covering session, mode, MCP, teammate, task, and API lifecycle events + built-in JSONL audit log | Logging, policy reminders, reading context, and system auditing |
 | Persistent memory | Markdown + YAML frontmatter memory store | User preferences and project knowledge |
 | Cron scheduler | 5-field cron jobs persisted to JSON | Recurring research prompts |
 
@@ -179,16 +183,27 @@ ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_BASE_URL=https://api.anthropic.com
 MODEL=claude-opus-4-1-20250805
 
+# DeepSeek-compatible example:
+# ANTHROPIC_BASE_URL=https://api.deepseek.example
+# MODEL=deepseek-v4-pro
+
 # Optional thinking controls
 THINKING_TYPE=enabled
 THINKING_BUDGET=4096
 
-# Optional DeepSeek-compatible effort field
+# Optional DeepSeek-compatible effort field (forwarded only for DeepSeek endpoints)
 THINKING_EFFORT=max
 
 # Optional cheaper model for sub-agents and teammates
 SUBAGENT_MODEL=deepseek-v4-flash
 ```
+
+Runtime state is stored under `data/` by default. For packaged or Django
+deployments, set `CLEARINK_DATA_DIR` in the process environment before startup
+to keep `.env`, logs, memories, tasks, MCP config, and teammate mailboxes in one
+explicit directory. If the Django process starts outside the Git repository
+that ClearInk should manage, set `CLEARINK_REPO_ROOT` to that repository path so
+worktree operations run against the intended repo.
 
 If you use the Google Scholar skill, also make sure `scholar` is installed and authenticated:
 
@@ -245,16 +260,26 @@ ClearInk/
 └── src/clearink/
     ├── main.py                 entry point and agent loop
     ├── config.py
+    ├── api/                    Django-friendly pure-Python API bridge
     ├── context_compact/        L1-L4 compaction
     ├── error_recovery/         retry, overflow, truncation
-    ├── hook/                   pluggable hooks and reading hooks
+    ├── hook/                   pluggable hooks, reading hooks, audit log
     ├── message/                content block serialization and text extraction
     ├── system_prompt/          prompt assembly and memory
-    ├── tool/                   registered tools
+    ├── tool/                   registered tools (each in its own sub-package)
+    │   ├── basetool/           bash, file, glob
+    │   ├── background/         background task execution
+    │   ├── mcp_client/         MCP stdio JSON-RPC client
+    │   ├── scheduler/          cron job scheduling
+    │   ├── skill/              SKILL.md loader
+    │   ├── subagent/           synchronous sub-agent delegation
+    │   ├── task_system/        DAG task management
+    │   ├── team/               teammate system (protocol, idle, worktree)
+    │   └── todo/               flat TODO list
     └── user/                   Rich CLI interface
         ├── console.py          console theme and lemon pixel art
         ├── interface.py        interactive prompt loop
-        ├── mode.py             mode state and command detection
+        ├── mode.py             mode state, step mode, and command detection
         └── output_format.py    LaTeX to plain-text conversion
 ```
 
@@ -315,7 +340,7 @@ def log_tool_usage(context):
     print(f"[{context.get('tool_name')}] -> {str(context.get('result'))[:100]}")
 ```
 
-Valid hook points: `userpromptsubmit`, `pretooluse`, `posttooluse`, `stop`.
+Valid hook points: ``userpromptsubmit``, ``pretooluse``, ``posttooluse``, ``stop``, ``session_created``, ``session_destroyed``, ``mode_switched``, ``step_mode_changed``, ``mcp_connected``, ``mcp_disconnected``, ``teammate_spawned``, ``teammate_stopped``, ``task_lifecycle``, ``api_request``.
 
 ---
 
@@ -325,7 +350,7 @@ Valid hook points: `userpromptsubmit`, `pretooluse`, `posttooluse`, `stop`.
 - Section, paragraph, and equation annotations require available source text or reliable retrieved evidence.
 - The Google Scholar workflow depends on an external `scholar` CLI and its authentication state.
 - `run_bash` currently uses `shell=True`; do not expose this runtime to untrusted users without sandboxing.
-- The project does not yet include tests or CI.
+- The test suite covers core formatting, DeepSeek-compatible request parameters, API session workflows, hooks, MCP registration, scheduler behavior, worktree helpers, and integration flows.
 - Some multi-agent tools are experimental and need more coverage before production use.
 
 ---
@@ -333,12 +358,13 @@ Valid hook points: `userpromptsubmit`, `pretooluse`, `posttooluse`, `stop`.
 ## Roadmap
 
 - [ ] Sandboxed command execution for `run_bash`
-- [ ] Unit tests for tool registration, prompt assembly, memory, compaction, scheduler, and task DAG behavior
-- [ ] Integration tests with mocked Anthropic-compatible API calls
+- [x] Unit tests for core output formatting and thinking replay behavior
+- [x] Integration tests with mocked Anthropic-compatible API calls
 - [ ] CI for linting, type checking, and tests
-- [ ] ArXiv, Semantic Scholar, Zotero, and PDF text extraction skills
+- [x] ArXiv, Semantic Scholar paper search (MCP integration)
+- [ ] Zotero and PDF text extraction skills
 - [ ] Stronger evidence tracking for section-level annotations
-- [ ] Local web UI for non-CLI users
+- [ ] Browser-based web UI
 - [ ] PyPI publishing workflow
 
 ---
@@ -347,7 +373,8 @@ Valid hook points: `userpromptsubmit`, `pretooluse`, `posttooluse`, `stop`.
 
 ```bash
 uv sync
-uv run ruff check
+uv run --no-sync pytest
+uv run --no-sync ruff check .
 uv run clearink
 ```
 
@@ -355,7 +382,7 @@ Contributions are welcome while the project is in alpha:
 
 1. Fork the repository.
 2. Create a feature branch.
-3. Keep changes focused and run `uv run ruff check`.
+3. Keep changes focused and run `uv run --no-sync pytest` plus `uv run --no-sync ruff check .`.
 4. Open a pull request with a short description of behavior and risk.
 
 Issues and discussions are tracked on [GitHub](https://github.com/Mr-remon219/ClearInk).

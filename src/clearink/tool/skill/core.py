@@ -1,5 +1,5 @@
 from clearink.tool.register import register_tool
-from ..config import SKILLS_DIR
+from ...config import SKILLS_DIR
 
 
 class Skill:

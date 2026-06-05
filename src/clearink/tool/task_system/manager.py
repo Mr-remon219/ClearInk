@@ -1,10 +1,12 @@
+"""TaskManager — DAG task management with persistence to JSON files."""
+
 from __future__ import annotations
+
 import json
 import threading
 from pathlib import Path
 
-from .register import register_tool
-from ..config import TASKS_DIR
+from ...config import TASKS_DIR
 
 _STATUS_ICONS = {
     "pending": " ",
@@ -159,6 +161,7 @@ class TaskManager:
 
     def get_task(self, task_id: str) -> str:
         with self._lock:
+            self._refresh()
             task = self.list_tasks.get(task_id)
             if task is None:
                 return f"Error: task '{task_id}' not found."
@@ -166,6 +169,7 @@ class TaskManager:
 
     def format_task_list(self) -> str:
         with self._lock:
+            self._refresh()
             if not self.list_tasks:
                 return "(no tasks)"
 
@@ -182,6 +186,16 @@ class TaskManager:
 
     # ── helpers ─────────────────────────────────────────
 
+    def _refresh(self) -> None:
+        """Reload all tasks from disk into the in-memory cache."""
+        disk_tasks = _load_all_tasks()
+        for tid, task in disk_tasks.items():
+            self.list_tasks[tid] = task
+        disk_ids = set(disk_tasks.keys())
+        for tid in list(self.list_tasks.keys()):
+            if tid not in disk_ids:
+                del self.list_tasks[tid]
+
     def _format_task(self, task_id: str) -> str:
         with self._lock:
             t = self.list_tasks.get(task_id)
@@ -197,117 +211,5 @@ class TaskManager:
 
 
 # ── singleton ───────────────────────────────────────────
+
 _manager = TaskManager()
-
-
-# ── registered tools ────────────────────────────────────
-
-@register_tool(
-    name="create_task",
-    description="Create a new task with optional dependencies (blockedBy). "
-                "Tasks form a DAG: a task can only be claimed when all its blockedBy "
-                "tasks are completed.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "subject": {"type": "string", "description": "Short task title (imperative form)"},
-            "description": {"type": "string", "description": "What needs to be done"},
-            "blockedBy": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Task IDs this task depends on",
-            },
-        },
-        "required": ["subject"],
-    },
-)
-def create_task(subject: str, description: str = "", blockedBy: list[str] | None = None) -> str:
-    return _manager.create_task(subject, description, blockedBy)
-
-
-@register_tool(
-    name="claim_task",
-    description="Claim a task to start working on it. "
-                "Only succeeds when all dependencies (blockedBy) are completed "
-                "and the task is still pending (prevents double-claiming).",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "task_id": {"type": "string", "description": "Task ID to claim"},
-            "owner": {"type": "string", "description": "Who is claiming (default: agent)"},
-        },
-        "required": ["task_id"],
-    },
-)
-def claim_task(task_id: str, owner: str = "agent") -> str:
-    return _manager.claim_task(task_id, owner)
-
-
-@register_tool(
-    name="complete_task",
-    description="Mark a task as completed. "
-                "Automatically unlocks any dependent tasks that now have all "
-                "prerequisites satisfied.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "task_id": {"type": "string", "description": "Task ID to complete"},
-        },
-        "required": ["task_id"],
-    },
-)
-def complete_task(task_id: str) -> str:
-    return _manager.complete_task(task_id)
-
-
-@register_tool(
-    name="get_task",
-    description="Get full details of a specific task by ID.",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "task_id": {"type": "string", "description": "Task ID to look up"},
-        },
-        "required": ["task_id"],
-    },
-)
-def get_task(task_id: str) -> str:
-    return _manager.get_task(task_id)
-
-
-@register_tool(
-    name="list_tasks",
-    description="List all tasks with status, owner, and dependency summaries.",
-    input_schema={
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-)
-def list_tasks() -> str:
-    return _manager.format_task_list()
-
-
-@register_tool(
-    name="check_task",
-    description="Check whether a task can be started (all dependencies completed).",
-    input_schema={
-        "type": "object",
-        "properties": {
-            "task_id": {"type": "string", "description": "Task ID to check"},
-        },
-        "required": ["task_id"],
-    },
-)
-def check_task(task_id: str) -> str:
-    with _manager._lock:
-        task = _manager.list_tasks.get(task_id)
-        if task is None:
-            return f"Error: task '{task_id}' not found."
-        if _manager.can_start(task_id):
-            return f"Task '{task_id}' ({task['subject']}) is ready to start."
-        blocked = [bid for bid in task.get("blockedBy", [])
-                   if _manager.list_tasks.get(bid, {}).get("status") != "completed"]
-        if task["status"] != "pending":
-            return f"Task '{task_id}' is {task['status']}."
-        return f"Task '{task_id}' is blocked by: {blocked}"

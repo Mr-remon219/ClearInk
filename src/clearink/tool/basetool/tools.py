@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from .register import register_tool
+from ..register import register_tool
 
 
 @register_tool(

@@ -22,4 +22,12 @@ data/.scheduled_tasks/*
 !data/.scheduled_tasks/.gitkeep
 data/logs/*
 !data/logs/.gitkeep
+
+# Runtime agent memory (user-local, not version-controlled)
+data/system_prompts/.memory/
+
+# MCP subproject: nested repo cloned at runtime, not a submodule
+data/mcp/servers/academic-search/
 .claude
+.pytest_cache
+.ruff_cache
