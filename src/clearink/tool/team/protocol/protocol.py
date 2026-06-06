@@ -24,6 +24,8 @@ from .state import (
     set_active_protocol_request,
 )
 
+_PROCESS_STARTED_AT = time.time()
+
 
 # ── ID generation ─────────────────────────────────────────────
 
@@ -256,6 +258,10 @@ def consume_lead_inbox(route_protocol: bool = True) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
 
     for msg in raw_msgs:
+        timestamp = msg.get("timestamp")
+        if isinstance(timestamp, int | float) and timestamp < _PROCESS_STARTED_AT:
+            continue
+
         protocol = msg.get("protocol") if route_protocol else None
         sender = msg.get("from", "unknown")
 

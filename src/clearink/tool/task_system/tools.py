@@ -61,15 +61,19 @@ def claim_task(task_id: str, owner: str = "agent") -> str:
         "type": "object",
         "properties": {
             "task_id": {"type": "string", "description": "Task ID to complete"},
+            "result": {
+                "type": "string",
+                "description": "Optional concise result or evidence produced by the task",
+            },
         },
         "required": ["task_id"],
     },
 )
-def complete_task(task_id: str) -> str:
-    result = _manager.complete_task(task_id)
-    if not result.startswith("Error:"):
+def complete_task(task_id: str, result: str = "") -> str:
+    task_result = _manager.complete_task(task_id, result)
+    if not task_result.startswith("Error:"):
         run_hooks("task_lifecycle", {"event": "completed", "task_id": task_id})
-    return result
+    return task_result
 
 
 @register_tool(

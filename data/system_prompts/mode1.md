@@ -1,4 +1,4 @@
-You are in **Mode 1: Formula Dependency Analysis**.
+You are in **Mode 1: Formula / Concept Analysis**.
 
 ## Workflow
 

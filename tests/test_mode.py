@@ -13,9 +13,11 @@ class TestModeCommandDetection(unittest.TestCase):
 
     def test_mode_1_command(self) -> None:
         self.assertEqual(mode_mod.detect_mode_command("/mode 1"), 1)
+        self.assertEqual(mode_mod.detect_mode_command("1"), 1)
 
     def test_mode_2_command(self) -> None:
         self.assertEqual(mode_mod.detect_mode_command("/mode 2"), 2)
+        self.assertEqual(mode_mod.detect_mode_command("2"), 2)
 
     def test_regular_message_returns_none(self) -> None:
         self.assertIsNone(mode_mod.detect_mode_command("hello"))
@@ -38,6 +40,7 @@ class TestModeCommandDetection(unittest.TestCase):
         """Extra text after /mode N should not match the strict regex."""
         self.assertIsNone(mode_mod.detect_mode_command("/mode 1 please"))
         self.assertIsNone(mode_mod.detect_mode_command("/mode 2 now"))
+        self.assertIsNone(mode_mod.detect_mode_command("1 please"))
 
 
 class TestModeSetAndGet(unittest.TestCase):
@@ -153,8 +156,9 @@ class TestBuildStepInstructions(unittest.TestCase):
     def test_contains_step_sections(self) -> None:
         instructions = mode_mod.build_step_instructions()
         self.assertIn("Step 1", instructions)
-        self.assertIn("Step 2", instructions)
-        self.assertIn("Step 3+", instructions)
+        # build_step_instructions() now returns only the current step's
+        # instruction (hard-coded single-step, not all-at-once).
+        # Multi-step content is verified in test_get_step_instruction_*.
 
     def test_contains_step_navigation_commands(self) -> None:
         instructions = mode_mod.build_step_instructions()
@@ -163,12 +167,36 @@ class TestBuildStepInstructions(unittest.TestCase):
 
     def test_contains_send_marker(self) -> None:
         instructions = mode_mod.build_step_instructions()
-        self.assertIn("[发送", instructions)
+        self.assertIn("[Send", instructions)
 
     def test_is_non_empty_string(self) -> None:
         instructions = mode_mod.build_step_instructions()
         self.assertIsInstance(instructions, str)
         self.assertTrue(len(instructions) > 0)
+
+    def test_capture_reading_tasks_uses_task_manager_snapshot(self) -> None:
+        fake_tasks = [
+            {"id": "1", "subject": "[READING] Paper A"},
+            {"id": "2", "subject": "Lookup symbol"},
+            {"id": "3", "subject": "[READING] Paper B"},
+        ]
+
+        with patch("clearink.tool.task_system.manager._manager") as manager:
+            manager.get_all.return_value = fake_tasks
+            captured = mode_mod.capture_reading_tasks()
+
+        self.assertEqual(
+            [task["subject"] for task in captured],
+            ["[READING] Paper A", "[READING] Paper B"],
+        )
+
+    def test_build_step_instruction_for_is_pure(self) -> None:
+        paper_tasks = [{"subject": "[READING] Dependency Paper"}]
+
+        instruction = mode_mod.build_step_instruction_for(3, paper_tasks)
+
+        self.assertIn("Dependency Paper", instruction)
+        self.assertEqual(mode_mod.get_current_step(), 0)
 
 
 class TestModeLabelsAndHints(unittest.TestCase):
@@ -184,11 +212,11 @@ class TestModeLabelsAndHints(unittest.TestCase):
 
     def test_get_mode_label_mode_1(self) -> None:
         mode_mod._current_mode = 1
-        self.assertEqual(mode_mod.get_mode_label(), "Formula Analysis")
+        self.assertEqual(mode_mod.get_mode_label(), "Formula / Concept")
 
     def test_get_mode_label_mode_2(self) -> None:
         mode_mod._current_mode = 2
-        self.assertEqual(mode_mod.get_mode_label(), "Paper Q&A")
+        self.assertEqual(mode_mod.get_mode_label(), "Describe Confusion")
 
     def test_get_mode_label_unknown(self) -> None:
         mode_mod._current_mode = 99
@@ -211,7 +239,7 @@ class TestModeLabelsAndHints(unittest.TestCase):
     def test_second_input_prompt_mode_2(self) -> None:
         mode_mod._current_mode = 2
         self.assertEqual(
-            mode_mod.get_second_input_prompt(), "Your question about the paper"
+            mode_mod.get_second_input_prompt(), "What concept are you struggling with?"
         )
 
 
@@ -226,7 +254,7 @@ class TestModePromptFallback(unittest.TestCase):
             mode_mod._PROMPTS_DIR = original_prompts_dir
 
         self.assertIn("Mode 1", prompt)
-        self.assertIn("Formula Dependency Analysis", prompt)
+        self.assertIn("Formula / Concept Analysis", prompt)
 
     def test_mode_2_fallback_when_prompt_file_missing(self) -> None:
         original_prompts_dir = mode_mod._PROMPTS_DIR
@@ -238,7 +266,7 @@ class TestModePromptFallback(unittest.TestCase):
             mode_mod._PROMPTS_DIR = original_prompts_dir
 
         self.assertIn("Mode 2", prompt)
-        self.assertIn("Paper Content Q&A", prompt)
+        self.assertIn("Describe Your Confusion", prompt)
 
 
 if __name__ == "__main__":

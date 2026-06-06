@@ -15,45 +15,60 @@
 
 ---
 
-**ClearInk** is an academic reading agent. You give it a paper title and a formula you don't understand — it tells you exactly which papers to read first, down to the specific section or paragraph.
+## Recommended Use
 
-For example: "Eq. (12) in Attention Is All You Need." ClearInk decomposes the formula into every symbol and operator, builds a dependency graph tracing each concept back to its source paper, verifies everything through Google Scholar, and returns a ranked reading path. Metadata is never fabricated — if a field is missing from BibTeX, it's reported as unavailable.
+Use general-purpose LLMs such as ChatGPT, Gemini, Claude, or DeepSeek for small, isolated questions.
 
-ClearInk runs in a Rich terminal with a lemon pixel-art welcome screen, mode-aware prompts, and Markdown rendering. Under the hood it's a focused Python agent runtime: decorator-registered tools, a DAG task system, parallel teammates with explicit dispatch, a Regulation module for supervision, sub-agents for sub-task acceleration, an MCP client for academic search, context compaction, and error recovery.
+Use **ClearInk** when a concept feels large enough that you need a structured learning path: ClearInk helps trace the prerequisite papers, concepts, and sections you should study first. After that, you can return to ChatGPT, Gemini, Claude, DeepSeek, or another model with a clearer map of what to ask.
 
-The project is in **alpha**. Citations are strict by design.
+```text
+Small question -> ChatGPT / Gemini / Claude / DeepSeek
+Systematic learning gap -> ClearInk -> ChatGPT / Gemini / Claude / DeepSeek
+```
+
+---
+
+**ClearInk** is a Rich-terminal academic reading agent for prerequisite paper pathfinding. It is not trying to be a general chatbot. You give it a paper title plus a formula, concept, or point of confusion; it helps identify what you need to understand first, which papers explain those prerequisites, and where to read inside those papers.
+
+For example: "Eq. (12) in Attention Is All You Need." ClearInk decomposes the formula into symbols, operators, and assumed concepts, turns the work into a dependency-aware task graph, dispatches independent lookups in parallel, verifies citation metadata through academic search tools, and returns a reading path with section-level guidance when evidence is available.
+
+ClearInk currently runs primarily as a guided command-line experience: a first-run setup wizard, mode-aware prompts, optional step-by-step output, Markdown rendering, and a lemon pixel-art welcome screen. Under the hood it is a focused Python agent runtime with decorator-registered tools, a DAG task system, parallel teammates, lead-side regulation, sub-agents, MCP academic search, context compaction, and API-call recovery.
+
+The project is in **alpha**. Citation metadata must be verified; missing metadata should be reported as unavailable, not inferred.
 
 ---
 
 ## Why ClearInk Exists
 
-Reading a research paper is rarely linear. When a paper writes
+Reading a research paper is rarely linear. A formula may assume notation conventions, earlier derivations, proof context, and several papers' worth of prior concepts. Tracing that path manually can take hours, while general-purpose LLMs can easily produce plausible but unverifiable titles, years, or authors.
 
-```text
-D(X+Y) = D(X) + D(Y) + 2Cov(X,Y)
-```
+ClearInk treats paper reading as a dependency problem:
 
-it assumes you already know the covariance expansion, the notation conventions, and the proof context. Tracing that trail manually can take hours. General-purpose LLMs often fill the gaps from memory, producing plausible but wrong titles, years, or authors.
-
-ClearInk treats paper reading as a dependency problem: identify each piece of a formula, find the papers that introduced or explained those pieces, rank them by dependency depth, and present a reading path backed by verified metadata.
+- break the formula or concept into smaller prerequisite units;
+- search for papers or sources that define or explain those units;
+- rank the results by dependency depth;
+- point the user to the relevant sections, paragraphs, or equations when the source text supports it.
 
 ---
 
 ## How It Works
 
-### The hard rule: 1 task = do it yourself, 2+ = go parallel
+### Two Reading Modes
 
-The lead agent models the formula as a **task DAG**. Each turn it calls `auto_dispatch()`, which enforces a single rule in code — not buried in a prompt:
+- **Mode 1 - Formula / Concept Analysis**: start from a paper title and a formula, equation number, or known concept. ClearInk decomposes the target and builds a prerequisite topology.
+- **Mode 2 - Describe Your Confusion**: start from a natural-language description of what you do not understand. ClearInk first identifies the core knowledge gap, then maps it to prerequisite concepts and papers.
 
-- **0 unblocked tasks** → wait for teammates or check dependencies
-- **1 unblocked task** → the lead executes it directly, no teammate overhead
-- **2+ unblocked tasks** → automatically spawns teammates for parallel execution
+### Hard-coded Parallel Dispatch
 
-Teammates are daemon threads that receive explicitly assigned tasks through a JSONL message bus. They work, report results, linger 10 seconds for follow-up assignments, then exit. No idle polling, no autonomous task claiming — all work is explicitly dispatched.
+The lead agent models work as a **task DAG**. Each turn it can call `auto_dispatch()`, which enforces a code-level rule:
 
-The lead supervises via the **Regulation module**: `regulate_teammates()` to see who's working on what, `inspect_teammate()` to review output, `reject_and_reassign()` to kill bad results and reassign, and `audit_stranded_tasks()` as a safety net for anything that slips through.
+- **0 unblocked tasks** -> wait for teammate results or inspect dependencies
+- **1 unblocked task** -> the lead executes it directly, avoiding teammate overhead
+- **2+ unblocked tasks** -> ClearInk automatically calls `execute_parallel()` and spawns teammates
 
-Teammates can call `spawn_subagent` internally to parallelize further — verifying three citations at once, for example. Both teammates and sub-agents share a single LLM tool loop (`_llm_loop.py`).
+Teammates receive explicit task assignments through JSONL inbox files, report results back to the lead, linger briefly for follow-up work, then exit. They do not autonomously claim tasks. The lead remains supervisor and quality gate through `regulate_teammates()`, `inspect_teammate()`, `reject_and_reassign()`, and `audit_stranded_tasks()`.
+
+Teammates can use `spawn_subagent` for smaller independent checks, such as verifying several citations in parallel. Both teammates and sub-agents share the same LLM tool-use loop.
 
 ---
 
@@ -61,25 +76,24 @@ Teammates can call `spawn_subagent` internally to parallelize further — verify
 
 ### Interaction
 
-- **Rich terminal** — pixel-art lemon welcome, spinner feedback, Markdown rendering.
-- **Step-by-step output** — `/step` breaks responses into stages; `/next` continues, `/end` restarts.
+- **Rich terminal interface** - first-run setup wizard, language selection, lemon welcome screen, spinner feedback, Markdown rendering.
+- **Two modes** - formula/concept analysis and "describe your confusion."
+- **Step-by-step output** - choose `/step` for the current round, use `/next` to continue, and `/end` to start a fresh round.
 
 ### Toolchain
 
-- **Google Scholar** — citation lookup with hard rules to verify metadata through the `scholar` CLI.
-- **MCP academic search** — ModelScope, Semantic Scholar, Crossref for verified paper search.
-- **24 registered tools** — bash, file I/O, glob, DAG tasks, sub-agents, teammate management, auto-dispatch, regulation, MCP client.
+- **Google Scholar workflow** - metadata verification through the external `scholar` CLI when available.
+- **MCP academic search** - configured through `data/mcp/servers.json`, with tools merged into the model tool pool at runtime.
+- **24 registered tools** - shell/file/glob helpers, DAG tasks, teammate management, auto-dispatch, regulation, sub-agents, and MCP connection.
 
 ### Agent Runtime
 
-- **System prompt** — built from a single compressed `guidelines.md`.
-- **Teammate system** — simplified WORK → LINGER → EXIT lifecycle, explicit dispatch via `assign_task_to_teammate` and `execute_parallel`, JSONL message bus, shutdown-only protocol.
-- **Regulation module** — 4 lead-only tools for parallel execution supervision, backed by `ExecutionTracker` with dual-index in-memory state.
-- **DAG task system** — dependency-resolved graph with write-through JSON persistence.
-- **Shared LLM loop** — `_llm_loop.py` used by both teammates and sub-agents, grouping all response blocks into a single assistant message.
-- **Reading hooks** — citation-verification reminders and paper-access tracking.
-- **Context compaction** — L2 (placeholder replacement) + L4 (summarization); L1 and L3 removed.
-- **Error recovery** — retry, context-overflow handling, truncation recovery.
+- **System prompt assembly** - built from `data/system_prompts/guidelines.md`, with mode instructions injected into user messages.
+- **DAG task system** - dependency-resolved tasks persisted as JSON; completed tasks may store concise result evidence.
+- **Teammate system** - explicit assignment, JSONL message bus, short linger window, lead-side supervision.
+- **Context and token handling** - large-content placeholdering, L4 summarization, context-overflow recovery, output truncation retry, and non-thinking replay sanitization.
+- **Reading hooks** - citation-request detection, paper-access tracking, and task lifecycle tracking.
+- **API bridge** - pure-Python session/endpoints layer for embedding ClearInk in another application, while the primary user experience remains the CLI.
 
 ---
 
@@ -97,11 +111,9 @@ uv sync
 
 ### 2. Configure
 
-```bash
-cp data/environment/.env.sample data/environment/.env
-```
+The CLI creates `data/environment/.env` through a first-run setup wizard. The wizard asks for your API key and output language, then writes sensible DeepSeek-compatible defaults.
 
-Fill in `data/environment/.env`:
+For manual setup, create `data/environment/.env` with:
 
 ```env
 ANTHROPIC_API_KEY=<your-api-key>
@@ -109,7 +121,7 @@ ANTHROPIC_BASE_URL=<your-api-endpoint>
 MODEL=<your-model-name>
 ```
 
-Optional: `THINKING_TYPE`, `THINKING_BUDGET`, `THINKING_EFFORT`, `SUBAGENT_MODEL`, `TEAMMATE_LINGER_SECONDS`.
+Optional: `THINKING_TYPE`, `THINKING_BUDGET`, `THINKING_EFFORT`, `SUBAGENT_MODEL`, `TEAMMATE_LINGER_SECONDS`, `CLEARINK_LANG`, `CLEARINK_DATA_DIR`, `CLEARINK_REPO_ROOT`.
 
 ### 3. Run
 
@@ -117,13 +129,16 @@ Optional: `THINKING_TYPE`, `THINKING_BUDGET`, `THINKING_EFFORT`, `SUBAGENT_MODEL
 uv run clearink
 ```
 
-You should see a lemon pixel-art welcome screen. Then:
+You should see the ClearInk welcome screen. A typical round looks like:
 
 ```text
-  Mode 1 · Formula Analysis
+Select mode:
+  [1] Formula / Concept Analysis
+  [2] Describe Your Confusion
 
 Paper title: Attention Is All You Need
 Formula number or description: scaled dot-product attention formula
+Press Enter to start, or type /step for step-by-step output
 ```
 
 ---
@@ -135,9 +150,9 @@ Formula number or description: scaled dot-product attention formula
                               |
                    Rich terminal interface
                               |
-                   Paper title + formula
+               Mode + paper + formula/question
                               |
-              System prompt (guidelines.md)
+              System prompt + mode instructions
                               |
                         Agent loop
                               |
@@ -146,12 +161,9 @@ Formula number or description: scaled dot-product attention formula
   Tool registry  Sub-agents  Teammates  Regulation  MCP Client
   (24 tools)     _llm_loop   team/      regulation/ mcp_client/
       |
-+-----+-----+-----+-----+-----+-----+
-|     |     |     |     |     |     |
-bash file glob task auto_  regu-  ...
-                   dispatch late
+      +---- DAG task system + auto_dispatch + JSON runtime state
                               |
-             Context compaction (L2+L4)
+             Context compaction + error recovery
 ```
 
 ---
@@ -163,30 +175,33 @@ ClearInk/
 ├── pyproject.toml
 ├── README.md / README_zh.md
 ├── data/
-│   ├── environment/.env          runtime config (not committed)
+│   ├── environment/.env          runtime config, created by setup wizard
 │   ├── system_prompts/
-│   │   ├── guidelines.md         system prompt
-│   │   └── mode1.md              mode 1 instructions
-│   ├── .tasks/                   DAG task persistence
-│   ├── .transcripts/             compaction archives
-│   └── team/                     teammate inbox files
+│   │   ├── guidelines.md         shared system guidance
+│   │   ├── mode1.md              formula/concept mode instructions
+│   │   └── mode2.md              describe-confusion mode instructions
+│   ├── skills/google_scholar/    Scholar workflow instructions
+│   ├── mcp/servers.json          MCP server configuration
+│   ├── .tasks/                   task JSON files, gitignored
+│   ├── .transcripts/             compaction archives, gitignored
+│   ├── task_outputs/             task output artifacts, gitignored
+│   ├── team/                     teammate inbox files, gitignored
+│   ├── logs/                     runtime logs, gitignored
+│   └── papers/                   downloaded PDFs/text, gitignored
 └── src/clearink/
     ├── main.py                   entry point + agent loop
-    ├── api/                      Django-friendly API bridge
-    ├── context_compact/          L2 + L4 compaction
-    ├── error_recovery/           retry / overflow / truncation
+    ├── api/                      embeddable Python API bridge
+    ├── context_compact/          L2 placeholdering + L4 summaries
+    ├── error_recovery/           retry / overflow / truncation recovery
     ├── hook/                     hooks + reading handlers
     ├── message/                  content block serialization
     ├── system_prompt/            prompt assembly
-    ├── tool/
-    │   ├── _llm_loop.py          shared LLM tool-use loop
-    │   ├── basetool/             bash, file, glob
-    │   ├── mcp_client/           MCP stdio JSON-RPC
-    │   ├── regulation/           lead supervision tools
-    │   ├── subagent/             sub-agent delegation
-    │   ├── task_system/          DAG task management
-    │   └── team/                 teammates + bus + tracker
-    └── user/                     Rich CLI interface
+    ├── tool/                     tools, tasks, teammates, MCP, regulation
+    └── user/
+        ├── interface.py          Rich CLI flow and first-run setup
+        ├── mode.py               mode selection and prompt collection
+        ├── i18n.py               UI language strings
+        └── output_format.py      Markdown / step output formatting
 ```
 
 ---
@@ -229,10 +244,11 @@ Valid hook points: `userpromptsubmit`, `pretooluse`, `posttooluse`, `stop`, `mod
 
 ## Current Limits
 
-- Formula decomposition is LLM-guided — no deterministic formula parser yet.
-- Section and equation annotations need accessible source text or reliable evidence.
-- The Google Scholar workflow depends on an external `scholar` CLI and its auth state.
-- Some multi-agent features are experimental.
+- Formula and concept decomposition is LLM-guided; there is no deterministic formula parser yet.
+- Section, paragraph, and equation recommendations require accessible source text or reliable evidence.
+- Google Scholar metadata verification depends on the external `scholar` CLI and its local auth/setup state.
+- Academic MCP servers may require local configuration or network availability.
+- Multi-agent execution is experimental and optimized for speed, but teammate outputs still need lead-side review.
 
 ---
 

@@ -31,6 +31,8 @@ class Session:
     messages: list[dict]
     mode: int = 1
     step_mode: bool = False
+    step_number: int = 0
+    paper_tasks: list[dict] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     last_access: float = field(default_factory=time.time)
     lock: threading.RLock = field(
@@ -52,6 +54,8 @@ class Session:
             self.messages = messages
             self.mode = mode
             self.step_mode = step_mode
+            self.step_number = 0
+            self.paper_tasks = []
             self.created_at = now
             self.last_access = now
 

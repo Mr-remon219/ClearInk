@@ -5,6 +5,7 @@ from .retry import call_with_retry
 from .overflow import is_context_overflow, recover, OVERFLOW_MAX_RETRIES
 from .truncation import should_retry, next_max_tokens, TRUNCATION_MAX_RETRIES
 from ..context_compact.config import CompactConfig
+from ..message import sanitize_messages_for_no_thinking
 
 
 def safe_api_call(
@@ -36,10 +37,14 @@ def safe_api_call(
 
         while True:
             try:
+                api_messages = messages
+                if not thinking or thinking.get("type") == "disabled":
+                    api_messages = sanitize_messages_for_no_thinking(messages)
+
                 kwargs = {
                     "model": model,
                     "system": system,
-                    "messages": messages,
+                    "messages": api_messages,
                     "tools": tools,
                     "max_tokens": current_max_tokens,
                 }

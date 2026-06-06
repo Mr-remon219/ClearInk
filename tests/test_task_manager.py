@@ -163,6 +163,23 @@ class TestTaskManager(unittest.TestCase):
         task = self.mgr.list_tasks["1"]
         self.assertEqual(task["owner"], "")
 
+    def test_complete_stores_optional_result(self):
+        self.mgr.create_task("with-result")
+        self.mgr.claim_task("1")
+        self.mgr.complete_task("1", result="verified paper metadata")
+        task = self.mgr.list_tasks["1"]
+        self.assertEqual(task["result"], "verified paper metadata")
+
+    def test_get_all_returns_sorted_snapshot(self):
+        self.mgr.create_task("first")
+        self.mgr.create_task("second")
+
+        snapshot = self.mgr.get_all()
+        self.assertEqual([task["id"] for task in snapshot], ["1", "2"])
+
+        snapshot[0]["subject"] = "mutated outside"
+        self.assertEqual(self.mgr.list_tasks["1"]["subject"], "first")
+
     # ── _refresh ───────────────────────────────────────────
 
     def test_refresh_picks_up_disk_changes(self):

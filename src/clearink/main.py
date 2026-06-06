@@ -13,8 +13,11 @@ from .error_recovery.wrapper import safe_api_call
 from .context_compact import CompactConfig, compact_messages, reactive_compact
 from .context_compact.token_estimate import estimate_tokens
 from .message import content_blocks_to_dicts
+from .user.i18n import set_lang
 
 load_dotenv(ENV_PATH, override=True)
+set_lang(os.getenv("CLEARINK_LANG", "en"))
+
 _client: Anthropic | None = None
 
 
@@ -56,6 +59,19 @@ def _build_extra_body() -> dict:
     if effort and "deepseek" in base_url.lower():
         body["output_config"] = {"effort": effort}
     return body
+
+
+def _merge_tool_defs(native_tools: list[dict], discovered_tools: list[dict]) -> list[dict]:
+    """Merge tool definitions by name, preserving native-tool order."""
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for tool_def in [*native_tools, *discovered_tools]:
+        name = tool_def.get("name")
+        if not name or name in seen:
+            continue
+        merged.append(tool_def)
+        seen.add(name)
+    return merged
 
 
 def agent_loop(
@@ -106,7 +122,7 @@ def agent_loop(
         try:
             # Merge MCP-discovered tools into the tool pool
             mcp_tools, mcp_handlers = assemble_tool_pool()
-            all_tools = TOOL + mcp_tools
+            all_tools = _merge_tool_defs(TOOL, mcp_tools)
 
             response, messages, compact_round = safe_api_call(
                 _get_client(),

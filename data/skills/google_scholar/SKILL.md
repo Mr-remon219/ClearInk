@@ -70,7 +70,7 @@ scholar search "corporate disclosure and information asymmetry" --json
 # With BibTeX citations (includes abstracts)
 scholar search "attention is all you need" --bibtex
 
-# Download PDFs for results with full-text links
+# Download PDFs for results with full-text links (saves to CWD; move to data/papers/ after)
 scholar search "transformer architectures" --download
 
 # Interactive multi-turn mode (follow-up questions)
@@ -91,7 +91,7 @@ scholar lookup "author:shleifer disclosure" --json
 # With BibTeX
 scholar lookup "asset pricing" --bibtex
 
-# With PDF download
+# With PDF download (saves to CWD; move to data/papers/ after)
 scholar lookup "deep learning" --download
 ```
 
@@ -112,7 +112,7 @@ scholar cite 5Gohgn6QFikJ 8409835334886051453 --json
 **Note:** `--download` works for open-access PDFs (arXiv, NBER, etc.) but is unreliable for papers behind library link resolvers (institutional access). For paywalled papers, return the URL and let the user download manually.
 
 ```bash
-scholar download "https://arxiv.org/pdf/1706.03762" --output attention.pdf
+scholar download "https://arxiv.org/pdf/1706.03762" --output data/papers/attention.pdf
 ```
 
 ## Quick Reference
@@ -123,11 +123,22 @@ scholar download "https://arxiv.org/pdf/1706.03762" --output attention.pdf
 | Keyword/author search | `scholar lookup "keywords"` |
 | BibTeX citations | Add `--bibtex` to search/lookup |
 | BibTeX by cluster ID | `scholar cite <clusterId>` |
-| Download PDFs | Add `--download` to search/lookup |
-| Download single PDF | `scholar download "url" --output file.pdf` |
+| Download PDFs | Add `--download` to search/lookup; move to `data/papers/` |
+| Download single PDF | `scholar download "url" --output data/papers/file.pdf` |
 | JSON output | Add `--json` to any command |
 | Interactive follow-ups | `scholar search --interactive` |
 | Re-authenticate | `scholar auth` |
+
+## Output Directory Convention (HARD RULE)
+
+**All downloaded PDFs and extracted text files MUST be placed in `data/papers/`, never in the repository root.**
+
+- When using `scholar download`, always specify the output path: `--output data/papers/<descriptive-name>.pdf`
+- When using `scholar search --download` or `scholar lookup --download`, the `scholar` CLI saves to the current working directory by default. Either:
+  1. `cd data/papers && scholar search "..." --download`, or
+  2. Download then immediately `mv *.pdf data/papers/`
+- All text extracted from PDFs (via `pdftotext`, `pymupdf`, or similar) must also be written to `data/papers/`
+- **Never** save paper files to the repository root — this pollutes the project root and causes untracked files
 
 ## Decision Tree: Which Command?
 

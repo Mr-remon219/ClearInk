@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+import time
+from pathlib import Path
 
 from clearink.tool.team.tools import (
     assign_task_to_teammate,
@@ -17,16 +20,60 @@ from clearink.tool.task_system.tools import (
 from clearink.tool.task_system.manager import _manager
 
 
+def _isolate_bus(path: Path) -> Path:
+    import clearink.tool.team.bus as bus_mod
+    import clearink.tool.team.lifecycle as lifecycle_mod
+    import clearink.tool.team.tools as tools_mod
+
+    path.mkdir(parents=True, exist_ok=True)
+    original = bus_mod._bus.base_dir
+    bus_mod._bus.base_dir = path
+    lifecycle_mod._bus.base_dir = path
+    tools_mod._bus.base_dir = path
+    lifecycle_mod._LINGER_MAX_SECONDS = 0
+    return original
+
+
+def _restore_bus(path: Path) -> None:
+    import clearink.tool.team.bus as bus_mod
+    import clearink.tool.team.lifecycle as lifecycle_mod
+    import clearink.tool.team.tools as tools_mod
+
+    bus_mod._bus.base_dir = path
+    lifecycle_mod._bus.base_dir = path
+    tools_mod._bus.base_dir = path
+
+
+def _stop_all_teammates() -> None:
+    from clearink.tool.team.lifecycle import _active_teammates, _active_lock
+
+    with _active_lock:
+        names = list(_active_teammates.keys())
+    for name in names:
+        stop_teammate(name)
+    if names:
+        time.sleep(1.2)
+
+
 class TestAssignTaskToTeammate(unittest.TestCase):
     """Tests for assign_task_to_teammate."""
 
     def setUp(self):
         """Ensure clean state before each test."""
+        self._tmp_runtime = tempfile.TemporaryDirectory()
+        self._orig_bus_dir = _isolate_bus(Path(self._tmp_runtime.name) / "team")
+
         # Clear any stale teammates
         from clearink.tool.team.lifecycle import _active_teammates, _active_lock
         with _active_lock:
             for name in list(_active_teammates.keys()):
                 stop_teammate(name)
+
+    def tearDown(self):
+        _stop_all_teammates()
+        time.sleep(1.2)
+        _restore_bus(self._orig_bus_dir)
+        self._tmp_runtime.cleanup()
 
     def test_assign_to_nonexistent_teammate_returns_error(self):
         """Assigning to a non-existent teammate returns an error."""
@@ -74,10 +121,15 @@ class TestExecuteParallel(unittest.TestCase):
     """Tests for execute_parallel."""
 
     def setUp(self):
-        from clearink.tool.team.lifecycle import _active_teammates, _active_lock
-        with _active_lock:
-            for name in list(_active_teammates.keys()):
-                stop_teammate(name)
+        self._tmp_runtime = tempfile.TemporaryDirectory()
+        self._orig_bus_dir = _isolate_bus(Path(self._tmp_runtime.name) / "team")
+        _stop_all_teammates()
+
+    def tearDown(self):
+        _stop_all_teammates()
+        time.sleep(1.2)
+        _restore_bus(self._orig_bus_dir)
+        self._tmp_runtime.cleanup()
 
     def test_execute_parallel_with_empty_list(self):
         """execute_parallel with empty list should handle gracefully."""

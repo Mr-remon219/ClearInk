@@ -113,15 +113,17 @@ def test_query_followup_step_and_session_lifecycle(api_state, monkeypatch) -> No
     assert follow["ok"] is True
     assert follow["step_mode"] is True
     followup_content = agent_inputs[1][-1]["content"]
-    assert "[Step mode active" in followup_content
+    assert "**Step 1" in followup_content
     assert "[Mode 2 instructions begin]" in followup_content
     assert "Mode 2: Paper Q&A test mode." in followup_content
     assert "Continue with details" in followup_content
+    assert mode_mod.get_current_step() == 0
 
     next_step = endpoints.step_next("django-session")
     _assert_json_response(next_step)
     assert next_step["ok"] is True
-    assert agent_inputs[2][-1]["content"] == "[继续下一步]"
+    assert "**Step 2" in agent_inputs[2][-1]["content"]
+    assert mode_mod.get_current_step() == 0
 
     end = endpoints.step_end("django-session")
     _assert_json_response(end)

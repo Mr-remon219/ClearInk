@@ -2,6 +2,8 @@ from rich.console import Console
 from rich.style import Style
 from rich.text import Text
 
+from .i18n import t
+
 console = Console()
 
 # Color theme
@@ -10,11 +12,11 @@ LEMON_CHEEK = Style(color="rgb(255,180,50)")
 LEAF_GREEN = Style(color="rgb(50,180,50)")
 DIM_LABEL = Style(color="rgb(140,140,140)", italic=True)
 
-# Lemon pixel art — each row is (art_chars, label_text)
+# Lemon pixel art — labels via i18n
 LEMON_ROWS = [
-    ("      ▄▄           ", "清 砚 / ClearInk"),
+    ("      ▄▄           ", t("lemon_name")),
     ("    ▄████▄         ", ""),
-    ("   ████████        ", "Literature Pathfinding Agent"),
+    ("   ████████        ", t("lemon_subtitle")),
     ("   ██▓▓▓▓██        ", ""),
     ("    ▀████▀         ", "V1.0-alpha-1"),
     ("      ▀▀           ", ""),

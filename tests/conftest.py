@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -39,31 +40,23 @@ _STATEFUL_MODULES: dict[str, dict[str, list[str]]] = {
     "clearink.hook.hook": {
         "attrs": ["HOOKS", "hook_context"],
     },
-    "clearink.tool.todo.core": {
-        "attrs": ["CURRENT_TODOS"],
-    },
     "clearink.user.mode": {
-        "attrs": ["_current_mode", "_step_mode"],
-    },
-    "clearink.system_prompt.system_build": {
-        "attrs": ["_last_key", "_last_context", "_last_prompt", "_current_memories"],
+        "attrs": [
+            "_current_mode", "_step_mode", "_step_number", "_paper_tasks",
+        ],
     },
 }
 
 # Extra globals that need resetting but live on instances / non-module objects
 _EXTRA_STATEFUL = [
-    "clearink.tool.background.core.background_tasks",
-    "clearink.tool.background.core.background_results",
-    "clearink.tool.background.core._bg_counter",
     "clearink.tool.mcp_client.core._mcp_clients",
     "clearink.tool.mcp_client.core._registered_mcp_tool_names",
-    "clearink.tool.skill.core._skill.AVAILABLE_SKILLS",
-    "clearink.tool.scheduler.core.scheduled_jobs",
-    "clearink.tool.scheduler.core._agent_busy",
-    "clearink.tool.scheduler.core._agent_loop_fn",
-    "clearink.tool.task_system.manager._manager._tasks",
+    "clearink.tool.task_system.manager._manager.list_tasks",
+    "clearink.tool.task_system.manager._manager._counter",
+    "clearink.tool.task_system.manager._manager._dirty",
     "clearink.tool.team.lifecycle._active_teammates",
-    "clearink.tool.team.bus._bus._inbox_dir",
+    "clearink.tool.team.tracker.tracker._executions",
+    "clearink.tool.team.tracker.tracker._rejections",
     "clearink.tool.team.protocol.state.pending_requests",
     "clearink.tool.team.protocol.state._request_counter",
     "clearink.api.session._session_manager._sessions",
@@ -94,7 +87,7 @@ def _patch_cached_path(monkeypatch, module_name: str, attr: str, new_path: Path)
         monkeypatch.setattr(mod, attr, new_path)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def reset_global_state():
     """Snapshot & restore all known ClearInk global state around each test.
 
@@ -134,7 +127,18 @@ def reset_global_state():
         for attr in info["attrs"]:
             key = (mod_name, attr)
             if key in snapshots:
-                setattr(mod, attr, snapshots[key])
+                current = getattr(mod, attr, None)
+                snapshot = snapshots[key]
+                if isinstance(current, dict) and isinstance(snapshot, dict):
+                    current.clear()
+                    current.update(snapshot)
+                elif isinstance(current, set) and isinstance(snapshot, set):
+                    current.clear()
+                    current.update(snapshot)
+                elif isinstance(current, list) and isinstance(snapshot, list):
+                    current[:] = snapshot
+                else:
+                    setattr(mod, attr, snapshot)
 
     # Restore extra globals
     for path in _EXTRA_STATEFUL:
@@ -152,7 +156,18 @@ def reset_global_state():
                     break
             if obj is not None and snapshots[path] is not None:
                 try:
-                    setattr(obj, attr_parts[-1], snapshots[path])
+                    current = getattr(obj, attr_parts[-1], None)
+                    snapshot = snapshots[path]
+                    if isinstance(current, dict) and isinstance(snapshot, dict):
+                        current.clear()
+                        current.update(snapshot)
+                    elif isinstance(current, set) and isinstance(snapshot, set):
+                        current.clear()
+                        current.update(snapshot)
+                    elif isinstance(current, list) and isinstance(snapshot, list):
+                        current[:] = snapshot
+                    else:
+                        setattr(obj, attr_parts[-1], snapshot)
                 except Exception:
                     pass  # some attrs may be read-only
 
@@ -250,6 +265,18 @@ def tmp_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cfg, "SCHEDULED_TASKS_DIR", data / ".scheduled_tasks")
     monkeypatch.setattr(cfg, "MCP_CONFIG_PATH", data / "mcp" / "servers.json")
 
+    _patch_cached_path(
+        monkeypatch,
+        "clearink.tool.task_system.manager",
+        "TASKS_DIR",
+        data / ".tasks",
+    )
+
+    bus_mod = sys.modules.get("clearink.tool.team.bus")
+    if bus_mod is not None:
+        monkeypatch.setattr(bus_mod, "TEAM_DIR", data / "team", raising=False)
+        monkeypatch.setattr(bus_mod._bus, "base_dir", data / "team")
+
     return data
 
 
@@ -300,3 +327,52 @@ def _set_test_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.example.com")
     monkeypatch.setenv("MODEL", "test-model")
     monkeypatch.setenv("THINKING_TYPE", "disabled")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_runtime_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Keep file-backed runtime state out of the real repository data dir."""
+    runtime_data = tmp_path / "runtime-data"
+    tasks_dir = runtime_data / ".tasks"
+    team_dir = runtime_data / "team"
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+    team_dir.mkdir(parents=True, exist_ok=True)
+
+    import clearink.config as cfg
+    monkeypatch.setattr(cfg, "TASKS_DIR", tasks_dir)
+    monkeypatch.setattr(cfg, "TEAM_DIR", team_dir)
+
+    _patch_cached_path(
+        monkeypatch,
+        "clearink.tool.task_system.manager",
+        "TASKS_DIR",
+        tasks_dir,
+    )
+
+    task_mod = sys.modules.get("clearink.tool.task_system.manager")
+    if task_mod is not None:
+        task_mod._manager.list_tasks.clear()
+        task_mod._manager._counter = 0
+        task_mod._manager._dirty = False
+
+    bus_mod = sys.modules.get("clearink.tool.team.bus")
+    if bus_mod is not None:
+        monkeypatch.setattr(bus_mod, "TEAM_DIR", team_dir, raising=False)
+        monkeypatch.setattr(bus_mod._bus, "base_dir", team_dir)
+
+    lifecycle_mod = sys.modules.get("clearink.tool.team.lifecycle")
+    if lifecycle_mod is not None:
+        monkeypatch.setattr(lifecycle_mod._bus, "base_dir", team_dir)
+        monkeypatch.setattr(lifecycle_mod, "_LINGER_MAX_SECONDS", 0)
+
+    yield
+
+    lifecycle_mod = sys.modules.get("clearink.tool.team.lifecycle")
+    if lifecycle_mod is not None:
+        monkeypatch.setattr(lifecycle_mod._bus, "base_dir", team_dir)
+        with lifecycle_mod._active_lock:
+            stop_events = list(lifecycle_mod._active_teammates.values())
+        for stop_event in stop_events:
+            stop_event.set()
+        if stop_events:
+            time.sleep(1.2)

@@ -56,6 +56,14 @@ def _make_user_message(text: str, current_mode: int) -> dict:
     return {"role": "user", "content": prefixed}
 
 
+def _advance_session_step(sess) -> str:
+    """Advance a session-local step counter and return its instruction."""
+    if sess.step_number == 2:
+        sess.paper_tasks = mode_mod.capture_reading_tasks()
+    sess.step_number += 1
+    return mode_mod.build_step_instruction_for(sess.step_number, sess.paper_tasks)
+
+
 def _ok(**kwargs) -> dict:
     data = dict(kwargs)
     data["ok"] = True
@@ -143,10 +151,19 @@ def followup(text: str, session_id: str) -> dict:
         with sess.lock:
             msg = _make_user_message(text, sess.mode)
 
-            # Inject step-mode instructions if active
+            # Inject step-mode instructions if active.
+            # Only advance on first call (step not yet started);
+            # subsequent follow-ups reuse the current step instruction.
+            # Explicit step advancement is handled by step_next().
             if sess.step_mode:
+                if sess.step_number == 0:
+                    step_instruction = _advance_session_step(sess)
+                else:
+                    step_instruction = mode_mod.build_step_instruction_for(
+                        sess.step_number, sess.paper_tasks,
+                    )
                 msg["content"] = (
-                    mode_mod.build_step_instructions() + "\n\n" + msg["content"]
+                    step_instruction + "\n\n" + msg["content"]
                 )
 
             sess.messages.append(msg)
@@ -183,7 +200,10 @@ def step_next(session_id: str) -> dict:
 
     try:
         with sess.lock:
-            sess.messages.append({"role": "user", "content": "[继续下一步]"})
+            sess.messages.append({
+                "role": "user",
+                "content": _advance_session_step(sess),
+            })
             messages = agent_loop(sess.messages)
             sess.messages = messages
             mgr.touch(session_id)
@@ -266,6 +286,9 @@ def set_step_mode(on: bool, session_id: str) -> dict:
 
     with sess.lock:
         sess.step_mode = on
+        if on:
+            sess.step_number = 0
+            sess.paper_tasks = []
         mgr.touch(session_id)
 
     return _ok(session_id=session_id, step_mode=on)
@@ -283,6 +306,7 @@ def get_session_info(session_id: str) -> dict:
             session_id=sess.session_id,
             mode=sess.mode,
             step_mode=sess.step_mode,
+            step_number=sess.step_number,
             messages_count=len(sess.messages),
             created_at=sess.created_at,
             last_access=sess.last_access,

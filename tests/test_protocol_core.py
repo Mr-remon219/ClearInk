@@ -3,7 +3,7 @@ import time
 from unittest.mock import MagicMock
 from clearink.tool.team.protocol import state as proto_state
 from clearink.tool.team.protocol.protocol import (
-    generate_request_id, register_protocol, match_response,
+    consume_lead_inbox, generate_request_id, register_protocol, match_response,
 )
 
 class TestGenerateRequestId(unittest.TestCase):
@@ -57,3 +57,23 @@ class TestMatchResponse(unittest.TestCase):
         register_protocol("plan_request", "plan_response")
         result = match_response("plan_response", "req_01", True)
         self.assertIsNone(result)
+
+
+def test_consume_lead_inbox_ignores_stale_process_messages(monkeypatch):
+    import clearink.tool.team.protocol.protocol as protocol_mod
+
+    class FakeBus:
+        def read_and_clear(self, name):
+            assert name == "lead"
+            return [
+                {"from": "old", "content": "stale", "timestamp": 10.0},
+                {"from": "new", "content": "fresh", "timestamp": 30.0},
+            ]
+
+    monkeypatch.setattr(protocol_mod, "_PROCESS_STARTED_AT", 20.0)
+    monkeypatch.setattr(protocol_mod, "_get_bus", lambda: FakeBus())
+
+    assert consume_lead_inbox(route_protocol=False) == [{
+        "role": "user",
+        "content": "[Teammate new]: fresh",
+    }]

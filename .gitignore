@@ -22,6 +22,8 @@ data/.scheduled_tasks/*
 !data/.scheduled_tasks/.gitkeep
 data/logs/*
 !data/logs/.gitkeep
+data/papers/*
+!data/papers/.gitkeep
 
 # Runtime agent memory (user-local, not version-controlled)
 data/system_prompts/.memory/

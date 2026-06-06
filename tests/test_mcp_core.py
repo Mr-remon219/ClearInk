@@ -162,3 +162,25 @@ def test_mcp_handler_reports_disconnected_server(isolated_mcp) -> None:
     handler = isolated_mcp._make_mcp_handler("missing_server", "find")
 
     assert handler(query="x") == "Error: MCP server 'missing_server' is not connected"
+
+
+def test_main_tool_merge_deduplicates_mcp_tools() -> None:
+    from clearink.main import _merge_tool_defs
+
+    native = [
+        {"name": "read_file", "description": "native"},
+        {"name": "mcp__server__find", "description": "already registered"},
+    ]
+    discovered = [
+        {"name": "mcp__server__find", "description": "discovered duplicate"},
+        {"name": "mcp__server__cite", "description": "new"},
+    ]
+
+    merged = _merge_tool_defs(native, discovered)
+
+    assert [tool["name"] for tool in merged] == [
+        "read_file",
+        "mcp__server__find",
+        "mcp__server__cite",
+    ]
+    assert merged[1]["description"] == "already registered"

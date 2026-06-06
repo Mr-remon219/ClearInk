@@ -268,3 +268,39 @@ def test_safe_api_call_mixed_recovery():
         assert third_call_kwargs["max_tokens"] == 32768
     finally:
         wrapper_mod.recover = original_recover
+
+
+def test_safe_api_call_sanitizes_thinking_for_non_thinking_requests():
+    client = MagicMock()
+    success = make_mock_response("end_turn", [make_text_block("success")])
+    client.messages.create.return_value = success
+
+    messages = [{
+        "role": "assistant",
+        "content": [
+            {"type": "thinking", "thinking": "hidden"},
+            {"type": "text", "text": "visible"},
+        ],
+    }]
+
+    result_response, result_messages, _ = safe_api_call(
+        client,
+        model="test-model",
+        system="You are a test.",
+        messages=messages,
+        tools=[],
+        max_tokens=1024,
+        thinking={"type": "disabled"},
+        extra_body=None,
+        config=CompactConfig(),
+        hook_context={},
+        compact_round=0,
+    )
+
+    sent_messages = client.messages.create.call_args.kwargs["messages"]
+    assert result_response is success
+    assert sent_messages == [{
+        "role": "assistant",
+        "content": [{"type": "text", "text": "visible"}],
+    }]
+    assert result_messages is messages

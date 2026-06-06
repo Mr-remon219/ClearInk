@@ -137,7 +137,7 @@ class TaskManager:
             _write_task(task)
             return f"Task '{task_id}' claimed by {owner}."
 
-    def complete_task(self, task_id: str) -> str:
+    def complete_task(self, task_id: str, result: str = "") -> str:
         with self._lock:
             task = self.list_tasks.get(task_id)
             if task is None:
@@ -146,10 +146,20 @@ class TaskManager:
             if task["status"] != "in_progress":
                 return f"Error: task '{task_id}' is {task['status']}, not in_progress."
 
+            owner = task.get("owner", "")
             task["status"] = "completed"
             task["owner"] = ""
+            if result:
+                task["result"] = result
             _write_task(task)
             self._dirty = True
+
+            if owner:
+                try:
+                    from ..team.tracker import tracker
+                    tracker.record_completion(owner)
+                except Exception:
+                    pass
 
             unblocked = []
             for child_id in task["blocks"]:
@@ -171,6 +181,14 @@ class TaskManager:
                 return json.dumps(task, ensure_ascii=False, indent=2)
             except (OSError, json.JSONDecodeError):
                 return f"Error: task '{task_id}' not found."
+
+    def get_all(self) -> list[dict]:
+        """Return a stable snapshot of all tasks sorted by task id."""
+        with self._lock:
+            return [
+                dict(self.list_tasks[tid])
+                for tid in sorted(self.list_tasks, key=_task_sort_key)
+            ]
 
     def refresh(self) -> None:
         """Reload all tasks from disk (thread-safe), only if dirty."""

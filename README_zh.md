@@ -15,45 +15,60 @@
 
 ---
 
-**ClearInk**（清砚）是一个学术阅读 agent。给它一篇论文标题和你没看懂的公式，它告诉你该先去读哪些前置论文——精确到具体的章节或段落。
+## 推荐使用方式
 
-比如你输入"Attention Is All You Need 里的公式 (12)"。ClearInk 会把公式拆成每个符号和运算符，构建一张依赖图，追溯每个概念的来源论文，通过 Google Scholar 验证引用信息，最后返回一条按深度分级的阅读路径。引用元数据从不瞎编——BibTeX 里缺什么就直接标注为不可用。
+遇到小而具体的问题，可以直接问 ChatGPT、Gemini、Claude、DeepSeek 等通用大模型。
 
-ClearInk 运行在 Rich 终端里，有柠檬像素风格的欢迎画面、随模式变化的输入提示和 Markdown 渲染输出。底层是一套紧凑的 Python agent 运行时：装饰器注册的工具、DAG 任务系统、显式调度的并行队友、用于监管的 Regulation 模块、用于子任务加速的 sub-agent、对接学术搜索的 MCP 客户端、上下文压缩和错误恢复。
+当你感觉某个知识点不是一句话能解释清楚，而是需要系统学习、需要知道“该先读什么、再读什么”时，使用 **ClearInk**。ClearInk 会帮你追溯前置论文、概念依赖和具体阅读位置；之后你再回到 ChatGPT、Gemini、Claude、DeepSeek 等模型继续提问，会更有方向。
 
-项目目前处于 **alpha** 阶段，引用规则设计上就刻意从严。
+```text
+小问题 -> ChatGPT / Gemini / Claude / DeepSeek
+需要系统学习的知识点 -> ClearInk -> ChatGPT / Gemini / Claude / DeepSeek
+```
+
+---
+
+**ClearInk**（清砚）是一个运行在 Rich 终端里的学术阅读 agent，目标不是替代通用聊天模型，而是帮你系统地找到“为了理解这个公式/概念，我应该先读什么”。你给它一篇论文标题，再给一个公式、概念，或描述自己卡住的地方，它会尝试拆解前置知识、追溯相关论文，并在证据允许时给出具体阅读位置。
+
+例如你输入“Attention Is All You Need 里的公式 (12)”。ClearInk 会把公式拆成符号、运算符和隐含概念，构造成依赖任务图；可并行的查找会交给队友 agent 同时执行；引用元数据通过学术搜索工具验证；最后输出按依赖深度组织的阅读路线。查不到的字段不会硬编，而是标为不可用。
+
+ClearInk 当前的主要体验是命令行引导：首次启动配置向导、模式选择、每轮可选的 step 分步输出、Markdown 渲染、柠檬像素欢迎画面。底层是一套紧凑的 Python agent 运行时：工具注册、DAG 任务系统、并行队友、lead 监管、sub-agent、MCP 学术搜索、上下文压缩和错误恢复。
+
+项目目前处于 **alpha** 阶段，引用验证规则刻意从严。
 
 ---
 
 ## ClearInk 解决什么问题
 
-读论文很少是线性的。当一篇论文写出
+读论文很少是线性的。一个公式背后可能隐含符号约定、前置推导、证明上下文，以及好几篇论文里的概念。手动追溯这些依赖很耗时间，而通用大模型又可能凭印象补出看似合理但无法验证的标题、年份或作者。
 
-```text
-D(X+Y) = D(X) + D(Y) + 2Cov(X,Y)
-```
+ClearInk 把读论文看作依赖图问题：
 
-它假定你已经知道协方差的展开式、符号惯例和证明上下文。手动追溯这些前置知识可能要花好几个小时。通用大语言模型往往凭记忆补全信息，给出看着合理实则错误的标题、年份或作者。
-
-ClearInk 把读论文当成依赖图问题来处理：找出公式的每个组成部分，搜索引出或解释这些概念的前置论文，按依赖深度排序，给出可验证的阅读路径。
+- 拆解公式或概念中的前置知识；
+- 搜索定义或解释这些知识的论文和资料；
+- 按依赖深度组织阅读顺序；
+- 在原文或可靠证据支持时，指出具体章节、段落或公式。
 
 ---
 
 ## 怎么做到的
 
-### 硬编码规则：1 个任务自己做，2 个以上并行分发
+### 两种阅读模式
 
-lead agent 把公式建模成一个**任务 DAG**。每轮调用 `auto_dispatch()`，这条规则是写在代码里的，不是塞在 prompt 里：
+- **Mode 1 - 公式/概念分析**：从论文标题和公式、公式编号或已知概念出发，拆解并构建前置阅读拓扑。
+- **Mode 2 - 描述不会的地方**：用户用自然语言描述卡住的问题，ClearInk 先识别核心知识缺口，再映射到前置概念和论文。
 
-- **0 个可执行任务** → 等待队友或检查依赖
-- **1 个可执行任务** → lead 自己直接做，不浪费队友开销
-- **2 个以上可执行任务** → 自动 spawn 队友并行执行
+### 硬编码并行调度
 
-队友是后台守护线程。它们通过 JSONL 消息总线接收显式分配的任务，干活、回报结果、等待 10 秒看有没有后续任务分配、然后退出。没有空闲轮询，没有自主抢任务——所有工作都是显式分配的。
+lead agent 把工作建模成一个**任务 DAG**。每轮可以调用 `auto_dispatch()`，这条规则写在代码里：
 
-lead 通过 **Regulation 模块**监督并行执行：`regulate_teammates()` 看谁在干什么，`inspect_teammate()` 审查输出质量，`reject_and_reassign()` 否决差结果并重分配，`audit_stranded_tasks()` 兜底检查有没有遗漏的任务。
+- **0 个可执行任务** -> 等待队友结果或检查依赖
+- **1 个可执行任务** -> lead 自己直接做，避免队友开销
+- **2 个以上可执行任务** -> 自动调用 `execute_parallel()` 并 spawn 队友
 
-队友内部可以调用 `spawn_subagent` 进一步并行——比如同时校验三篇引用。队友和 sub-agent 共享同一个 LLM 工具循环（`_llm_loop.py`）。
+队友通过 JSONL inbox 接收显式任务分配，完成后向 lead 汇报，短暂等待后续任务，然后退出。队友不会自主抢任务。lead 通过 `regulate_teammates()`、`inspect_teammate()`、`reject_and_reassign()`、`audit_stranded_tasks()` 进行监督和质量控制。
+
+队友内部还可以调用 `spawn_subagent` 处理更小的并行检查，例如同时验证多篇引用。队友和 sub-agent 共用同一个 LLM 工具循环。
 
 ---
 
@@ -61,25 +76,24 @@ lead 通过 **Regulation 模块**监督并行执行：`regulate_teammates()` 看
 
 ### 交互
 
-- **Rich 终端** — 柠檬像素欢迎画面，spinner 等待，Markdown 渲染。
-- **Step 分步输出** — `/step` 拆成多步回答；`/next` 继续，`/end` 重新开始。
+- **Rich 终端界面** — 首次配置向导、语言选择、柠檬欢迎画面、spinner 等待、Markdown 渲染。
+- **两种模式** — 公式/概念分析，以及“描述不会的地方”。
+- **Step 分步输出** — 每轮开始可选择 `/step`；用 `/next` 继续；用 `/end` 开启新一轮。
 
 ### 工具链
 
-- **Google Scholar** — 引用查询，通过 `scholar` CLI 验证元数据。
-- **MCP 学术搜索** — 对接 ModelScope、Semantic Scholar、Crossref。
-- **24 个注册工具** — bash、文件读写、glob、DAG 任务、sub-agent、队友管理、auto-dispatch、regulation、MCP 客户端。
+- **Google Scholar 工作流** — 在可用时通过外部 `scholar` CLI 验证元数据。
+- **MCP 学术搜索** — 通过 `data/mcp/servers.json` 配置，并在运行时合并进模型可用工具。
+- **24 个注册工具** — shell、文件、glob、DAG 任务、队友管理、auto-dispatch、regulation、sub-agent、MCP 连接。
 
 ### Agent 运行时
 
-- **系统提示词** — 由一份精简的 `guidelines.md` 构建。
-- **队友系统** — 简化生命周期（WORK → LINGER → EXIT），通过 `assign_task_to_teammate` 和 `execute_parallel` 显式分配，JSONL 消息总线，仅保留 shutdown 协议。
-- **Regulation 模块** — 4 个 lead 专用监管工具，背后是双索引内存存储的 `ExecutionTracker`。
-- **DAG 任务系统** — 依赖解析图，写穿式 JSON 持久化。
-- **共享 LLM 循环** — `_llm_loop.py` 同时服务于队友和 sub-agent，将所有响应块合并为单条 assistant 消息。
-- **阅读钩子** — 引用验证提醒和论文文件访问追踪。
-- **上下文压缩** — L2（大文本占位替换）+ L4（摘要）；L1 和 L3 已移除。
-- **错误恢复** — 重试、上下文溢出处理、截断恢复。
+- **系统提示词装配** — 由 `data/system_prompts/guidelines.md` 构建，模式指令注入到用户消息中。
+- **DAG 任务系统** — 任务按依赖执行并持久化为 JSON；完成任务可保存简短结果证据。
+- **队友系统** — 显式分配、JSONL 消息总线、短暂 linger、lead 监督。
+- **上下文与 token 处理** — 大文本占位、L4 摘要、上下文溢出恢复、输出截断重试、非 thinking 请求的历史 thinking 清理。
+- **阅读钩子** — 引用请求检测、论文访问追踪、任务生命周期追踪。
+- **API 桥接层** — 提供可嵌入其他应用的 Python session/endpoints；主要用户体验仍是 CLI。
 
 ---
 
@@ -97,11 +111,9 @@ uv sync
 
 ### 2. 配置
 
-```bash
-cp data/environment/.env.sample data/environment/.env
-```
+首次运行 CLI 时会通过配置向导生成 `data/environment/.env`。向导会询问 API key 和输出语言，并写入 DeepSeek 兼容端点的默认配置。
 
-编辑 `data/environment/.env`，填入：
+如果你想手动配置，创建 `data/environment/.env` 并填入：
 
 ```env
 ANTHROPIC_API_KEY=<your-api-key>
@@ -109,7 +121,7 @@ ANTHROPIC_BASE_URL=<your-api-endpoint>
 MODEL=<your-model-name>
 ```
 
-可选：`THINKING_TYPE`、`THINKING_BUDGET`、`THINKING_EFFORT`、`SUBAGENT_MODEL`、`TEAMMATE_LINGER_SECONDS`。
+可选：`THINKING_TYPE`、`THINKING_BUDGET`、`THINKING_EFFORT`、`SUBAGENT_MODEL`、`TEAMMATE_LINGER_SECONDS`、`CLEARINK_LANG`、`CLEARINK_DATA_DIR`、`CLEARINK_REPO_ROOT`。
 
 ### 3. 运行
 
@@ -117,13 +129,16 @@ MODEL=<your-model-name>
 uv run clearink
 ```
 
-看到柠檬像素欢迎画面就说明跑起来了：
+启动后会看到 ClearInk 欢迎界面。一轮典型输入如下：
 
 ```text
-  Mode 1 · Formula Analysis
+选择模式：
+  [1] 公式/概念分析
+  [2] 有不会的请描述给我
 
-Paper title: Attention Is All You Need
-Formula number or description: scaled dot-product attention formula
+论文标题：Attention Is All You Need
+公式编号或描述：scaled dot-product attention formula
+按回车开始，或输入 /step 启用分步输出
 ```
 
 ---
@@ -135,9 +150,9 @@ Formula number or description: scaled dot-product attention formula
                               |
                    Rich 终端交互界面
                               |
-                    论文标题 + 公式
+               模式 + 论文 + 公式/问题
                               |
-               系统提示词 (guidelines.md)
+               系统提示词 + 模式指令
                               |
                         Agent 循环
                               |
@@ -146,12 +161,9 @@ Formula number or description: scaled dot-product attention formula
    工具注册表   Sub-agent   队友系统   Regulation  MCP 客户端
    (24个工具)  _llm_loop   team/      regulation/ mcp_client/
       |
-+-----+-----+-----+-----+-----+-----+
-|     |     |     |     |     |     |
-bash file glob task auto_  regu-  ...
-                   dispatch late
+      +---- DAG 任务系统 + auto_dispatch + JSON 运行态
                               |
-               上下文压缩 (L2+L4)
+                 上下文压缩 + 错误恢复
 ```
 
 ---
@@ -163,30 +175,33 @@ ClearInk/
 ├── pyproject.toml
 ├── README.md / README_zh.md
 ├── data/
-│   ├── environment/.env          运行时配置（不提交）
+│   ├── environment/.env          运行时配置，由首次启动向导创建
 │   ├── system_prompts/
-│   │   ├── guidelines.md         系统提示词
-│   │   └── mode1.md              Mode 1 指令
-│   ├── .tasks/                   DAG 任务持久化
-│   ├── .transcripts/             压缩归档
-│   └── team/                     队友收件箱文件
+│   │   ├── guidelines.md         通用系统指引
+│   │   ├── mode1.md              公式/概念模式指令
+│   │   └── mode2.md              描述困惑模式指令
+│   ├── skills/google_scholar/    Scholar 工作流说明
+│   ├── mcp/servers.json          MCP server 配置
+│   ├── .tasks/                   任务 JSON，gitignored
+│   ├── .transcripts/             压缩归档，gitignored
+│   ├── task_outputs/             任务输出产物，gitignored
+│   ├── team/                     队友 inbox 文件，gitignored
+│   ├── logs/                     运行日志，gitignored
+│   └── papers/                   下载的 PDF/文本，gitignored
 └── src/clearink/
     ├── main.py                   入口 + agent 循环
-    ├── api/                      Django 友好的 API 桥接层
-    ├── context_compact/          L2 + L4 压缩
-    ├── error_recovery/           重试 / 溢出 / 截断
+    ├── api/                      可嵌入的 Python API 桥接层
+    ├── context_compact/          L2 占位 + L4 摘要
+    ├── error_recovery/           重试 / 溢出 / 截断恢复
     ├── hook/                     钩子系统 + 阅读处理
     ├── message/                  内容块序列化
     ├── system_prompt/            提示词装配
-    ├── tool/
-    │   ├── _llm_loop.py          共享 LLM 工具循环
-    │   ├── basetool/             bash、文件、glob
-    │   ├── mcp_client/           MCP stdio JSON-RPC
-    │   ├── regulation/           lead 监管工具
-    │   ├── subagent/             sub-agent 委托
-    │   ├── task_system/          DAG 任务管理
-    │   └── team/                 队友 + 消息总线 + tracker
-    └── user/                     Rich CLI 界面
+    ├── tool/                     工具、任务、队友、MCP、监管
+    └── user/
+        ├── interface.py          Rich CLI 流程和首次启动配置
+        ├── mode.py               模式选择与输入收集
+        ├── i18n.py               UI 多语言文案
+        └── output_format.py      Markdown / step 输出格式化
 ```
 
 ---
@@ -229,10 +244,11 @@ def log_tool_usage(context):
 
 ## 当前局限
 
-- 公式分解靠 LLM 判断，还没有确定性的公式解析器。
-- 章节和公式标注需要有可获取的原文或可靠证据支持。
-- Google Scholar 工作流依赖外部 `scholar` CLI 及其认证状态。
-- 部分多 agent 功能仍属实验性质。
+- 公式和概念拆解依赖 LLM 判断，还没有确定性公式解析器。
+- 章节、段落、公式编号推荐需要可获取的原文或可靠证据支持。
+- Google Scholar 元数据验证依赖外部 `scholar` CLI 及其本地配置/认证状态。
+- 学术 MCP server 可能需要本地配置或网络可用性。
+- 多 agent 执行仍属实验性质，目标是加速，但队友结果仍需要 lead 审查。
 
 ---
 

@@ -53,4 +53,11 @@ def get_system_prompt(sections: list[str] | None = None) -> str:
             part = builder({})
             if part:
                 parts.append(part)
+
+    # Inject LLM output language directive (zh only; en path unaffected)
+    from ..user.i18n import get_lang_instruction
+    lang_inst = get_lang_instruction()
+    if lang_inst:
+        parts.append(lang_inst)
+
     return "\n\n".join(parts)
