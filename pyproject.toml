@@ -1,6 +1,6 @@
 [project]
 name = "clearink"
-version = "1.0.0-alpha.1"
+version = "V1.0-alpha-2"
 description = "An academic literature pathfinding agent — given a formula or paper, maps prerequisite dependencies with verifiable, section-annotated citations. Installable CLI with decorator-based tool registry, SKILL.md extension system, sub-agent delegation, and layered context compaction."
 readme = "README.md"
 license = { text = "MIT" }
