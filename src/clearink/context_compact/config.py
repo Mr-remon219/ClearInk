@@ -2,18 +2,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from clearink.config import TASK_OUTPUTS_DIR, TRANSCRIPTS_DIR
+from clearink.config import TRANSCRIPTS_DIR
 
 
 @dataclass
 class CompactConfig:
-    # L3: Tool Result Archiving
-    l3_min_chars: int = 4000
+    """Configuration for context compaction.
 
-    # L1: Middle Trimming
-    l1_keep_first_exchanges: int = 3
-    l1_keep_last_exchanges: int = 5
-    l1_min_exchanges: int = 4
+    Two layers remain (L1 and L3 removed as unnecessary):
+      L2 — replaces large text blocks with file references
+      L4 — summarizes conversation and keeps last few exchanges
+    """
 
     # L2: Placeholder Replacement
     l2_min_chars: int = 3000
@@ -34,9 +33,6 @@ class CompactConfig:
     reactive_interval_turns: int = 15
 
     # Directories
-    task_outputs_dir: Path = field(
-        default_factory=lambda: TASK_OUTPUTS_DIR
-    )
     transcripts_dir: Path = field(
         default_factory=lambda: TRANSCRIPTS_DIR
     )
@@ -45,5 +41,4 @@ class CompactConfig:
     session_id: str = ""
 
     def ensure_dirs(self) -> None:
-        self.task_outputs_dir.mkdir(parents=True, exist_ok=True)
         self.transcripts_dir.mkdir(parents=True, exist_ok=True)

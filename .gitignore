@@ -31,3 +31,4 @@ data/mcp/servers/academic-search/
 .claude
 .pytest_cache
 .ruff_cache
+CLAUDE.md

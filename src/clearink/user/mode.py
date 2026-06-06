@@ -157,7 +157,6 @@ def build_query(paper: str, second_input: str) -> str:
 def set_step_mode(on: bool) -> None:
     global _step_mode
     _step_mode = on
-    run_hooks("step_mode_changed", {"step_mode": on})
 
 
 def is_step_mode() -> bool:

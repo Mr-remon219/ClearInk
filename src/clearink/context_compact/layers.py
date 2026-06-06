@@ -1,12 +1,21 @@
+"""Context compaction layers — L2 placeholder replacement and exchange utilities.
+
+L1 (middle trimming) and L3 (tool result archiving) have been removed:
+  - L1 risked silently dropping DAG task creation/completion records
+  - L3 rarely triggered for compact paper-search results (<4000 chars)
+"""
+
 from __future__ import annotations
 
 from .config import CompactConfig
-from .archive import write_task_output, write_l2_content
+from .archive import write_l2_content
 
 
 # --- Exchange Segmentation ---
 
 def segment_exchanges(messages: list) -> list[list[dict]]:
+    """Split a flat message list into exchanges. A new user message
+    (not a tool_result batch) starts a new exchange."""
     if not messages:
         return []
 
@@ -47,71 +56,11 @@ def _starts_new_exchange(msg: dict) -> bool:
 
 
 def rebuild_messages(exchanges: list[list[dict]]) -> list:
+    """Flatten exchange segments back into a single message list."""
     result = []
     for ex in exchanges:
         result.extend(ex)
     return result
-
-
-# --- L3: Tool Result Archiving ---
-
-_ARCHIVE_PREFIX = "[Tool output archived ->"
-
-
-def layer3_archive_results(messages: list, config: CompactConfig) -> list:
-    exchange_idx = 0
-    ex_segments = segment_exchanges(messages)
-
-    for ex in ex_segments:
-        for msg in ex:
-            if not isinstance(msg, dict):
-                continue
-            content = msg.get("content")
-            if not isinstance(content, list):
-                continue
-            for block in content:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") != "tool_result":
-                    continue
-                block_content = block.get("content", "")
-                if not isinstance(block_content, str):
-                    continue
-                if block_content.startswith(_ARCHIVE_PREFIX):
-                    continue
-                if len(block_content) < config.l3_min_chars:
-                    continue
-
-                tool_id = block.get("tool_use_id", "unknown")
-                try:
-                    filename = write_task_output(
-                        block_content, tool_id, exchange_idx, config.task_outputs_dir,
-                    )
-                    block["content"] = (
-                        f"[Tool output archived -> data/task_outputs/{filename}]"
-                    )
-                except OSError:
-                    pass  # keep original content
-
-        exchange_idx += 1
-
-    return messages
-
-
-# --- L1: Middle Trimming ---
-
-def layer1_trim_middle(messages: list, config: CompactConfig) -> list:
-    exchanges = segment_exchanges(messages)
-    if len(exchanges) <= config.l1_min_exchanges:
-        return messages
-
-    keep_first = config.l1_keep_first_exchanges
-    keep_last = config.l1_keep_last_exchanges
-    if keep_first + keep_last >= len(exchanges):
-        return messages
-
-    kept = exchanges[:keep_first] + exchanges[-keep_last:]
-    return rebuild_messages(kept)
 
 
 # --- L2: Placeholder Replacement ---
@@ -122,6 +71,8 @@ _COMPACT_PREFIX = "[Content compacted:"
 def layer2_placeholder_large(
     messages: list, config: CompactConfig, round_number: int,
 ) -> list:
+    """Replace large text blocks (>l2_min_chars) with file-reference placeholders.
+    Skips the most recent exchange to preserve current context."""
     exchanges = segment_exchanges(messages)
     if not exchanges:
         return messages
@@ -129,8 +80,9 @@ def layer2_placeholder_large(
     l2_idx = 0
 
     for i, ex in enumerate(exchanges):
+        # Skip the most recent exchange — preserve the latest context intact
         if i == len(exchanges) - 1:
-            continue  # skip the most recent exchange
+            continue
 
         for msg in ex:
             if not isinstance(msg, dict):
@@ -179,8 +131,6 @@ def layer2_placeholder_large(
 
 def _should_replace(text: str, config: CompactConfig) -> bool:
     if len(text) < config.l2_min_chars:
-        return False
-    if text.startswith(_ARCHIVE_PREFIX):
         return False
     if text.startswith(_COMPACT_PREFIX):
         return False

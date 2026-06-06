@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import unittest
 
-from clearink.hook.reading import _looks_like_paper, _format_journal_entry
+from clearink.hook.reading import _looks_like_paper, track_task_events
+from clearink.hook.hook import hook_context
 
 
 class TestLooksLikePaper(unittest.TestCase):
@@ -35,78 +36,41 @@ class TestLooksLikePaper(unittest.TestCase):
         self.assertFalse(_looks_like_paper("/path/to/random_file.xyz"))
 
 
-class TestFormatJournalEntry(unittest.TestCase):
-    """Tests for _format_journal_entry."""
+class TestTrackTaskEvents(unittest.TestCase):
+    """Tests for track_task_events."""
 
-    def test_returns_string_with_turn_number(self):
-        context = {
-            "turns": 3,
-            "hook_context": {
-                "current_paper": {"name": "Attention Paper"},
-                "citation_requested": True,
-                "papers_accessed": [
-                    {"path": "/p1.pdf", "name": "paper1", "access_count": 2}
-                ],
-            },
-            "messages": [
-                {"role": "user", "content": "What does this formula mean?"}
-            ],
-        }
-        result = _format_journal_entry(context)
-        self.assertIn("Turn 3", result)
+    def setUp(self):
+        # Reset hook_context before each test
+        hook_context.pop("last_rejected_task", None)
+        hook_context.pop("last_reassigned_task", None)
 
-    def test_contains_timestamp(self):
+    def test_rejected_event_sets_last_rejected_task(self):
         context = {
-            "turns": 1,
-            "hook_context": {
-                "current_paper": {"name": "Test"},
-                "citation_requested": False,
-                "papers_accessed": [],
-            },
-            "messages": [],
+            "event": "rejected",
+            "task_id": "42",
+            "from_teammate": "alice",
+            "reason": "incomplete",
+            "hook_context": hook_context,
         }
-        result = _format_journal_entry(context)
-        self.assertIn("--", result)
+        track_task_events(context)
+        self.assertEqual(hook_context.get("last_rejected_task"), "42")
 
-    def test_contains_paper_name(self):
+    def test_reassigned_event_sets_last_reassigned_task(self):
         context = {
-            "turns": 2,
-            "hook_context": {
-                "current_paper": {"name": "Transformer"},
-                "citation_requested": False,
-                "papers_accessed": [],
-            },
-            "messages": [],
+            "event": "reassigned",
+            "task_id": "7",
+            "to_teammate": "bob",
+            "hook_context": hook_context,
         }
-        result = _format_journal_entry(context)
-        self.assertIn("Transformer", result)
+        track_task_events(context)
+        self.assertEqual(hook_context.get("last_reassigned_task"), "7")
 
-    def test_contains_citation_flag(self):
+    def test_unknown_event_does_nothing(self):
         context = {
-            "turns": 4,
-            "hook_context": {
-                "current_paper": {"name": "Paper A"},
-                "citation_requested": True,
-                "papers_accessed": [],
-            },
-            "messages": [],
+            "event": "created",
+            "task_id": "1",
+            "hook_context": hook_context,
         }
-        result = _format_journal_entry(context)
-        self.assertIn("True", result)
-
-    def test_contains_papers_accessed_count(self):
-        context = {
-            "turns": 5,
-            "hook_context": {
-                "current_paper": {"name": "Paper B"},
-                "citation_requested": False,
-                "papers_accessed": [
-                    {"path": "/a.pdf"},
-                    {"path": "/b.pdf"},
-                    {"path": "/c.pdf"},
-                ],
-            },
-            "messages": [],
-        }
-        result = _format_journal_entry(context)
-        self.assertIn("3", result)
+        track_task_events(context)
+        self.assertNotIn("last_rejected_task", hook_context)
+        self.assertNotIn("last_reassigned_task", hook_context)

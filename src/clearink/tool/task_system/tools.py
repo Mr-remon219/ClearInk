@@ -112,14 +112,70 @@ def list_tasks() -> str:
     },
 )
 def check_task(task_id: str) -> str:
-    with _manager._lock:
-        task = _manager.list_tasks.get(task_id)
-        if task is None:
-            return f"Error: task '{task_id}' not found."
-        if _manager.can_start(task_id):
-            return f"Task '{task_id}' ({task['subject']}) is ready to start."
-        blocked = [bid for bid in task.get("blockedBy", [])
-                   if _manager.list_tasks.get(bid, {}).get("status") != "completed"]
-        if task["status"] != "pending":
-            return f"Task '{task_id}' is {task['status']}."
-        return f"Task '{task_id}' is blocked by: {blocked}"
+    return _manager.check_task_ready(task_id)
+
+
+@register_tool(
+    name="get_unblocked_tasks",
+    description="List all tasks ready to execute. "
+                "For automatic dispatch (1=self, 2+=parallel), prefer auto_dispatch.",
+    input_schema={
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+)
+def get_unblocked_tasks() -> str:
+    """List all immediately executable (parallelizable) tasks."""
+    _manager.refresh()
+    unblocked = _manager.get_unblocked()
+
+    if not unblocked:
+        return "(no unblocked tasks)"
+
+    lines = [f"{len(unblocked)} unblocked task(s) ready for execution:"]
+    for t in unblocked:
+        lines.append(
+            f"  #{t['id']}: {t['subject']}"
+            + (f" — {t.get('description', '')[:80]}" if t.get('description') else "")
+        )
+
+    if len(unblocked) >= 2:
+        lines.append(
+            f"\nHint: {len(unblocked)} tasks ready. Use auto_dispatch() to handle automatically."
+        )
+
+    return "\n".join(lines)
+
+
+@register_tool(
+    name="auto_dispatch",
+    description="Automatically check for unblocked tasks and dispatch: "
+                "0 tasks → nothing ready; "
+                "1 task → lead should execute it directly; "
+                "2+ tasks → automatically spawn teammates via execute_parallel. "
+                "This is the primary work-dispatch tool — call it every turn.",
+    input_schema={"type": "object", "properties": {}, "required": []},
+)
+def auto_dispatch() -> str:
+    """Hard-coded dispatch rule: 1=self, 2+=parallel (no LLM judgment needed)."""
+    _manager.refresh()
+    unblocked = _manager.get_unblocked()
+
+    if not unblocked:
+        return "(no unblocked tasks — wait for teammates to finish or check deps)"
+
+    if len(unblocked) == 1:
+        t = unblocked[0]
+        return (
+            f"Only 1 task ready — execute it yourself.\n\n"
+            f"Task #{t['id']}: {t['subject']}\n"
+            f"Description: {t.get('description', 'N/A')}\n\n"
+            f"Claim it with claim_task(task_id=\"{t['id']}\"), "
+            f"complete with complete_task(task_id=\"{t['id']}\")."
+        )
+
+    # 2+ tasks → automatic parallel dispatch
+    from ..team.tools import execute_parallel
+    task_ids = [t["id"] for t in unblocked]
+    return execute_parallel(task_ids, role="auto")

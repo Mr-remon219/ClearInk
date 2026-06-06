@@ -12,7 +12,6 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from clearink.hook import run_hooks
 
 
 @dataclass
@@ -90,7 +89,6 @@ class SessionManager:
         session = Session(session_id=sid, messages=[])
         with self._lock:
             self._sessions[sid] = session
-        run_hooks("session_created", {"session_id": sid, "mode": session.mode})
         return session
 
     def get(self, session_id: str) -> Session | None:
@@ -100,27 +98,18 @@ class SessionManager:
 
     def get_or_create(self, session_id: str) -> Session:
         """Return existing session or create a new one with the given id."""
-        created = False
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
                 session = Session(session_id=session_id, messages=[])
                 self._sessions[session_id] = session
-                created = True
 
-        if created:
-            run_hooks(
-                "session_created",
-                {"session_id": session_id, "mode": session.mode},
-            )
         return session
 
     def delete(self, session_id: str) -> None:
         """Remove a session.  No-op if it does not exist."""
         with self._lock:
-            session = self._sessions.pop(session_id, None)
-        if session is not None:
-            run_hooks("session_destroyed", {"session_id": session_id})
+            self._sessions.pop(session_id, None)
 
     def touch(self, session_id: str) -> None:
         """Update ``last_access`` to the current time."""

@@ -8,7 +8,6 @@ end-to-end tool_use -> tool_result roundtrip.
 from __future__ import annotations
 
 from clearink.main import agent_loop
-from clearink.tool import background as bg_module
 from clearink.tool.register import TOOL, TOOL_HANDLERS
 from tests.helpers import (
     make_mock_response,
@@ -27,9 +26,7 @@ import pytest  # noqa: E402 (import after agent_loop is fine, pytest handles it)
 @pytest.fixture(autouse=True)
 def _mock_expensive_deps(mocker):
     """Prevent sub-agent LLM calls, MCP assembly, and system-prompt file reads."""
-    mocker.patch("clearink.main.load_memories", return_value="")
-    mocker.patch("clearink.main.extract_memories", return_value=[])
-    mocker.patch("clearink.main.consolidate_memories", return_value="")
+    # Memory subsystem removed — no-op, session self-contained for paper topology
     mocker.patch("clearink.main.assemble_tool_pool", return_value=([], {}))
     mocker.patch("clearink.main.get_system_prompt", return_value="System prompt.")
 
@@ -355,52 +352,6 @@ def test_tool_handler_raises_exception(mock_anthropic):
 # 10.  Background task dispatch
 # ===================================================================
 
-def test_background_task_dispatch(mock_anthropic, mocker):
-    """Verify background task dispatch: start_background_task is called.
-
-    Background tasks run in daemon threads — we mock collection to return
-    a known message so the test is deterministic and doesn't race threads.
-    """
-    start_spy = mocker.spy(bg_module, "start_background_task")
-
-    # Override collect_background_results to return a known result.
-    # The spy on the original is replaced, so we don't spy on it.
-    mocker.patch.object(
-        bg_module, "collect_background_results",
-        return_value=["[Background] Task bg_1 (run_bash) done:\ncollect_called"],
-    )
-
-    mock_anthropic.side_effect = [
-        make_mock_response(
-            "tool_use",
-            [
-                make_tool_use_block(
-                    "call_bg", "run_bash",
-                    {
-                        "command": "echo bg_test",
-                        "run_in_background": True,
-                    },
-                ),
-            ],
-        ),
-        make_mock_response("end_turn", [make_text_block("Done.")]),
-    ]
-
-    messages = [make_user_message("Run in background")]
-    result = agent_loop(messages)
-
-    assert start_spy.call_count >= 1, (
-        "start_background_task should have been called"
-    )
-
-    bg_result_found = False
-    for msg in result:
-        if msg["role"] != "user":
-            continue
-        content = msg.get("content", "")
-        if isinstance(content, str) and "collect_called" in content:
-            bg_result_found = True
-            break
-    assert bg_result_found, (
-        "Background task result should appear in messages"
-    )
+# Background task dispatch test removed — background module has been deleted.
+# All tools now run synchronously since no operations in the paper-topology
+# workflow require background execution (sub-agent spawning is handled internally).

@@ -5,7 +5,7 @@ has its own ``{name}_inbox.jsonl`` file under ``data/team/``.
 
 Messages are appended as JSON lines with an automatic ``timestamp``
 field.  Reading is destructive: ``read_and_clear`` returns all messages
-and truncates the file.
+and truncates the file.  ``peek`` reads without clearing.
 """
 
 from __future__ import annotations
@@ -60,17 +60,27 @@ class MessageBus:
             path.write_text("", encoding="utf-8")
             return messages
 
-    def collect_for_lead(self) -> list[dict]:
-        msgs = self.read_and_clear("lead")
-        result = []
-        for msg in msgs:
-            sender = msg.get("from", "unknown")
-            content = msg.get("content", "")
-            result.append({
-                "role": "user",
-                "content": f"[Teammate {sender}]: {content}",
-            })
-        return result
+    def peek(self, name: str) -> list[dict]:
+        """Non-destructive read — returns messages without clearing the inbox."""
+        with self._lock:
+            path = self.inbox_path(name)
+            if not path.exists():
+                return []
+            try:
+                content = path.read_text(encoding="utf-8").strip()
+            except OSError:
+                return []
+            if not content:
+                return []
+            messages = []
+            for line in content.splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    messages.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            return messages
 
 
 # Singleton instance

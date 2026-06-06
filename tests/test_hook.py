@@ -9,16 +9,11 @@ _KNOWN_HOOK_TYPES = {
     "pretooluse",
     "posttooluse",
     "stop",
-    "session_created",
-    "session_destroyed",
     "mode_switched",
-    "step_mode_changed",
     "mcp_connected",
-    "mcp_disconnected",
     "teammate_spawned",
     "teammate_stopped",
     "task_lifecycle",
-    "api_request",
 }
 
 
@@ -36,8 +31,8 @@ class TestHookRegistry(unittest.TestCase):
     def test_hooks_has_expected_types(self) -> None:
         self.assertEqual(set(HOOKS.keys()), _KNOWN_HOOK_TYPES)
 
-    def test_hooks_has_14_types(self) -> None:
-        self.assertEqual(len(HOOKS), 14)
+    def test_hooks_has_9_types(self) -> None:
+        self.assertEqual(len(HOOKS), 9)
 
     def test_all_hook_types_start_empty(self) -> None:
         for hook_type, handlers in HOOKS.items():

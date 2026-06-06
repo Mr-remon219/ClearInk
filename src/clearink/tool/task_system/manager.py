@@ -64,6 +64,7 @@ class TaskManager:
         self.list_tasks: dict[str, dict] = _load_all_tasks()
         self._counter: int = _max_id(self.list_tasks)
         self._lock = threading.RLock()
+        self._dirty = False  # True when disk may be newer than in-memory cache
 
     # ── public API ──────────────────────────────────────
 
@@ -101,6 +102,7 @@ class TaskManager:
                 _write_task(self.list_tasks[bid])
 
             _write_task(task)
+            self._dirty = True
             return self._format_task(task_id)
 
     def can_start(self, task_id: str) -> bool:
@@ -147,6 +149,7 @@ class TaskManager:
             task["status"] = "completed"
             task["owner"] = ""
             _write_task(task)
+            self._dirty = True
 
             unblocked = []
             for child_id in task["blocks"]:
@@ -160,16 +163,24 @@ class TaskManager:
             return msg
 
     def get_task(self, task_id: str) -> str:
+        """Read a single task directly from its JSON file (O(1) I/O)."""
         with self._lock:
-            self._refresh()
-            task = self.list_tasks.get(task_id)
-            if task is None:
+            path = _task_file(task_id)
+            try:
+                task = json.loads(path.read_text(encoding="utf-8"))
+                return json.dumps(task, ensure_ascii=False, indent=2)
+            except (OSError, json.JSONDecodeError):
                 return f"Error: task '{task_id}' not found."
-            return json.dumps(task, ensure_ascii=False, indent=2)
+
+    def refresh(self) -> None:
+        """Reload all tasks from disk (thread-safe), only if dirty."""
+        with self._lock:
+            if self._dirty:
+                self._refresh()
+                self._dirty = False
 
     def format_task_list(self) -> str:
         with self._lock:
-            self._refresh()
             if not self.list_tasks:
                 return "(no tasks)"
 
@@ -183,6 +194,42 @@ class TaskManager:
                     f"[{icon}] #{tid}: {t['subject']}{owner}{blocked}"
                 )
             return "\n".join(lines)
+
+    def get_unblocked(self) -> list[dict]:
+        """Return all tasks that can start immediately (in-memory, no disk I/O)."""
+        with self._lock:
+            return [
+                task for tid, task in self.list_tasks.items()
+                if self.can_start(tid)
+            ]
+
+    def check_task_ready(self, task_id: str) -> str:
+        """Return a human-readable status string for a task (public API)."""
+        with self._lock:
+            task = self.list_tasks.get(task_id)
+            if task is None:
+                return f"Error: task '{task_id}' not found."
+            if self.can_start(task_id):
+                return f"Task '{task_id}' ({task['subject']}) is ready to start."
+            blocked = [
+                bid for bid in task.get("blockedBy", [])
+                if self.list_tasks.get(bid, {}).get("status") != "completed"
+            ]
+            if task["status"] != "pending":
+                return f"Task '{task_id}' is {task['status']}."
+            return f"Task '{task_id}' is blocked by: {blocked}"
+
+    def reset_task(self, task_id: str) -> str:
+        """Reset a task to pending (for reassignment after rejection)."""
+        with self._lock:
+            task = self.list_tasks.get(task_id)
+            if task is None:
+                return f"Error: task '{task_id}' not found."
+            task["status"] = "pending"
+            task["owner"] = ""
+            _write_task(task)
+            self._dirty = True
+            return f"Task '{task_id}' reset to pending."
 
     # ── helpers ─────────────────────────────────────────
 

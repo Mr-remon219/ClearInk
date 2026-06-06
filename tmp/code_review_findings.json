@@ -1,0 +1,20 @@
+[
+  {
+    "file": "src/clearink/tool/team/tools.py",
+    "line": 31,
+    "summary": "Module-level _parallel_batch_counter incremented without lock protection",
+    "failure_scenario": "`_parallel_batch_counter += 1` (line 171) is a read-modify-write spanning 3 bytecode ops. If `execute_parallel` is ever called from multiple threads (e.g., parallel teammate execution or future refactoring), the non-atomic increment can produce duplicate batch IDs, causing teammate name collisions (e.g., `worker-b3-1` assigned to two different tasks), lost task assignments, and silent data corruption in the ExecutionTracker."
+  },
+  {
+    "file": "src/clearink/hook/reading.py",
+    "line": 132,
+    "summary": "context.setdefault shares and mutates the module-level hook_context dict without synchronization",
+    "failure_scenario": "`track_task_events` is registered for the `task_lifecycle` hook type. When called via `_run_hooks(\"task_lifecycle\", {\"event\": \"reassigned\", ...})` the context dict lacks a `hook_context` key, so `setdefault` inserts the module-level `hook_context` dict as the value. The function then mutates it (`ctx[\"last_reassigned_task\"] = ...`). Since `task_lifecycle` hooks fire from both the main agent thread and teammate threads concurrently, this creates an unsynchronized data race on the shared dict entries. One thread's write can be clobbered by another, causing lost rejected/reassigned state and inconsistent reading-context data visible to the LLM."
+  },
+  {
+    "file": "src/clearink/tool/team/tools.py",
+    "line": 120,
+    "summary": "_manager.list_tasks accessed outside the manager lock in assign_task_to_teammate and execute_parallel",
+    "failure_scenario": "`_manager.list_tasks.get(task_id)` is called without holding `_manager._lock` at lines 120 and 180, violating the class's locking discipline. While `can_start()` later re-reads under the lock, the unprotected read in `assign_task_to_teammate` (line 120) can return `None` if a concurrent thread removes the task between `claim_task` and `.get()`, producing a misleading \"task not found\" error after a successful claim. In `execute_parallel` (line 180), `task['subject']` is read from this unprotected reference and used in the spawn prompt, which could show stale or incorrect data if another thread modifies the task dict concurrently."
+  }
+]

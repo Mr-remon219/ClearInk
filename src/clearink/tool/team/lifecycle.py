@@ -1,20 +1,21 @@
-"""Teammate lifecycle management: spawn, stop, idle loop state machine.
+"""Teammate lifecycle management: spawn, stop, simplified state machine.
 
-The idle loop is a three-state machine (WORK → IDLE → SHUTDOWN) that
-processes inbox messages, runs LLM turns, and polls for autonomous work
-via the task board.
+The lifecycle is a two-phase model (WORK → LINGER → EXIT) that
+processes inbox messages, runs LLM turns, and exits after a configurable
+idle timeout.  No auto-claiming or task-board polling — all work is
+explicitly assigned.
 """
 
 from __future__ import annotations
 
 import os
 import threading
+import time
 
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
 from ...config import ENV_PATH
-from ...message import content_block_to_dict
 from .bus import _bus
 from .protocol import (
     handle_inbox_message,
@@ -22,17 +23,26 @@ from .protocol import (
     clear_protocol_request,
     consume_lead_inbox,
 )
-from .idle import PollResult, idle_poll
 from . import tools as _tools  # noqa: F401 — ensure tools are registered
 
 load_dotenv(ENV_PATH, override=True)
 
 _SUB_MODEL = os.getenv("SUBAGENT_MODEL", "deepseek-v4-flash")
 
-# Tools excluded from teammate agent's tool set
+# Configurable linger timeout (seconds) before an idle teammate exits
+_LINGER_MAX_SECONDS = int(os.getenv("TEAMMATE_LINGER_SECONDS", "10"))
+_LINGER_POLL_SECONDS = 1
+
+# Tools excluded from teammate agent's tool set.
+# spawn_subagent is intentionally NOT excluded — teammates can use it to accelerate sub-tasks.
+# subagent internally blocks recursive spawn_subagent calls.
 _EXCLUDED_TOOLS = {
-    "spawn_teammate", "schedule_cron", "cancel_scheduled_job",
-    "request_shutdown", "request_plan", "review_plan",
+    "spawn_teammate",
+    "request_shutdown",
+    # Regulation / dispatch tools — teammates cannot supervise or dispatch
+    "execute_parallel", "auto_dispatch",
+    "regulate_teammates", "inspect_teammate",
+    "reject_and_reassign", "audit_stranded_tasks",
 }
 
 # Active teammate registry
@@ -63,86 +73,80 @@ def _run_teammate_turn(
     max_turns: int = 5,
 ) -> str:
     """Run up to *max_turns* LLM calls for a single work batch."""
-    client = Anthropic()
+    from .._llm_loop import run_llm_tool_loop
+
     tools, handlers = _get_teammate_tools()
-    collected: list[str] = []
+    system = (
+        f"You are {name}, a specialized AI teammate. "
+        f"Role: {role}. "
+        f"Work on the assigned task and report back when done. "
+        f"Be concise and focused. "
+        f"If your task involves multiple independent sub-steps "
+        f"(e.g., looking up multiple papers, verifying multiple "
+        f"citations), use spawn_subagent to execute them in "
+        f"parallel. Each subagent runs independently with its "
+        f"own tool set. Collect their results and synthesize a "
+        f"single response."
+    )
 
-    for _ in range(max_turns):
-        try:
-            response = client.messages.create(
-                model=_SUB_MODEL,
-                system=f"You are {name}, a specialized AI teammate. "
-                       f"Role: {role}. "
-                       f"Work on the assigned task and report back when done. "
-                       f"Be concise and focused.",
-                messages=messages,
-                tools=tools,
-                max_tokens=2048,
-                thinking={"type": "disabled"},
-            )
-        except Exception as e:
-            return f"[Teammate {name} error: {e}]"
-
-        if response.stop_reason == "end_turn":
-            text = "".join(
-                b.text for b in response.content if b.type == "text"
-            )
-            collected.append(text)
-            return "\n".join(filter(None, collected)) or f"[Teammate {name}: no output]"
-
-        for block in response.content:
-            if block.type == "text":
-                text = block.text or ""
-                collected.append(text)
-                messages.append({"role": "assistant", "content": text})
-            elif block.type == "tool_use":
-                handler = handlers.get(block.name)
-                try:
-                    result = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                except Exception as e:
-                    result = f"Error: {e}"
-                messages.append({"role": "assistant", "content": [content_block_to_dict(block)]})
-                messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": str(result),
-                    }],
-                })
-
-    return "\n".join(filter(None, collected)) + "\n\n[teammate: max turns reached]" if collected else f"[Teammate {name}: max turns reached]"
+    try:
+        return run_llm_tool_loop(
+            client=Anthropic(),
+            model=_SUB_MODEL,
+            system=system,
+            messages=messages,
+            tools=tools,
+            handlers=handlers,
+            max_turns=max_turns,
+        )
+    except Exception as e:
+        return f"[Teammate {name} error: {e}]"
 
 
-# ── Idle loop (WORK / IDLE / SHUTDOWN state machine) ─────────
+# ── Simplified lifecycle (WORK → LINGER → EXIT) ───────────────
 
 def _teammate_idle_loop(name: str, role: str, prompt: str) -> None:
-    """Three-state main loop for a teammate background thread.
+    """Two-phase main loop for a teammate background thread.
 
-    WORK phase : read inbox messages, run LLM turns, write responses.
-    IDLE phase : poll inbox (for shutdown) and task board; auto-claim.
-    SHUTDOWN   : write final summary and exit.
+    WORK   — read inbox, run LLM turns, write responses to lead.
+    LINGER — inbox empty; wait for new messages, exit on timeout.
+    EXIT   — final cleanup, notify lead.
 
-    Transitions:
-        WORK ──(inbox empty)──> IDLE ──(task claimed)──> WORK
-          │                       │
-          └──(shutdown/stop)──────┴──(60s idle)────────> SHUTDOWN
+    No idle polling, no auto-claiming — all work explicitly assigned.
     """
     with _active_lock:
         stop_event = _active_teammates.get(name)
     if stop_event is None:
         return
 
-    # Write initial task as first inbox message
-    _bus.write(name, {"from": "lead", "content": prompt})
+    # Write initial task as first inbox message (skip if prompt is empty —
+    # the task will be written later via assign_task_to_teammate)
+    if prompt:
+        _bus.write(name, {"from": "lead", "content": prompt})
 
-    state = "WORK"  # WORK | IDLE | SHUTDOWN
+    while not stop_event.is_set():
+        # ── WORK: process all available inbox messages ──
+        shutdown = _work_phase(name, role, stop_event)
+        if shutdown:
+            break
 
-    while not stop_event.is_set() and state != "SHUTDOWN":
-        if state == "WORK":
-            state = _work_phase(name, role, stop_event)
-        elif state == "IDLE":
-            state = _idle_phase(name, role, stop_event)
+        # ── LINGER: wait for new assignments, exit on timeout ──
+        found_work = False
+        for _ in range(_LINGER_MAX_SECONDS):
+            if stop_event.is_set():
+                break
+            time.sleep(_LINGER_POLL_SECONDS)
+
+            if _bus.peek(name):
+                found_work = True
+                break  # re-enter WORK — _work_phase will read_and_clear
+
+        if not found_work and not stop_event.is_set():
+            break  # timeout → EXIT
+
+    # Clean up registry before exit
+    with _active_lock:
+        _active_teammates.pop(name, None)
 
     # Final shutdown notification to lead
     _bus.write("lead", {
@@ -151,18 +155,17 @@ def _teammate_idle_loop(name: str, role: str, prompt: str) -> None:
     })
 
 
-def _work_phase(name: str, role: str, stop_event: threading.Event) -> str:
-    """Process all available inbox messages.  Returns next state.
+def _work_phase(name: str, role: str, stop_event: threading.Event) -> bool:
+    """Process all available inbox messages.
 
-    Returns:
-        ``"IDLE"``     — inbox is empty, no more work.
-        ``"SHUTDOWN"`` — stop_event was set.
+    Returns True if shutdown was requested (caller should exit),
+    False if inbox is empty (caller should enter LINGER).
     """
     while not stop_event.is_set():
         raw_msgs = _bus.read_and_clear(name)
 
         if not raw_msgs:
-            return "IDLE"
+            return False  # inbox empty → LINGER
 
         llm_messages: list[dict] = []
 
@@ -178,7 +181,7 @@ def _work_phase(name: str, role: str, stop_event: threading.Event) -> str:
                 })
 
         if stop_event.is_set():
-            return "SHUTDOWN"
+            return True
 
         if llm_messages:
             result = _run_teammate_turn(name, role, llm_messages)
@@ -210,19 +213,9 @@ def _work_phase(name: str, role: str, stop_event: threading.Event) -> str:
                 })
 
         if stop_event.is_set():
-            return "SHUTDOWN"
+            return True
 
-        continue
-
-    return "SHUTDOWN"
-
-
-def _idle_phase(name: str, role: str, stop_event: threading.Event) -> str:
-    """Poll for new work via :func:`idle_poll`.  Returns next state."""
-    result, _ = idle_poll(name, role, stop_event)
-    if result == PollResult.WORK:
-        return "WORK"
-    return "SHUTDOWN"
+    return True
 
 
 # ── Lead inbox collection ─────────────────────────────────────
@@ -230,9 +223,8 @@ def _idle_phase(name: str, role: str, stop_event: threading.Event) -> str:
 def collect_teammate_messages() -> list[dict]:
     """Collect and format teammate messages for LLM consumption.
 
-    Delegates to consume_lead_inbox() which:
-    - Intercepts protocol responses and matches them to pending requests
-    - Formats idle notifications as human-readable status lines
-    - Passes through plain content messages (backward compatible)
+    Delegates to consume_lead_inbox() which intercepts protocol responses,
+    matches them to pending requests, and formats them as human-readable
+    status lines.
     """
     return consume_lead_inbox(route_protocol=True)

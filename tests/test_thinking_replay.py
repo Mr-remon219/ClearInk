@@ -107,16 +107,7 @@ class ThinkingReplayTests(unittest.TestCase):
             patch.object(main_module, "_get_client", return_value=object()),
             patch.object(main_module, "safe_api_call", side_effect=fake_safe_api_call),
             patch.object(main_module, "get_system_prompt", return_value="system"),
-            patch.object(main_module, "load_memories", return_value=""),
-            patch.object(main_module, "extract_memories", return_value=[]),
             patch.object(main_module, "run_hooks"),
-            patch.object(main_module.background, "collect_background_results", return_value=[]),
-            patch.object(main_module.background, "should_run_background", return_value=False),
-            patch.object(
-                main_module.background,
-                "strip_runtime_control_args",
-                side_effect=lambda args: args,
-            ),
             patch.object(main_module.team, "collect_teammate_messages", return_value=[]),
             patch.dict(
                 main_module.TOOL_HANDLERS,

@@ -12,15 +12,13 @@ import pytest
 
 @pytest.fixture
 def api_state(monkeypatch, tmp_data_dir):
-    import clearink.api.endpoints as endpoints
     import clearink.api.session as session_mod
     import clearink.user.mode as mode_mod
 
     mgr = session_mod.SessionManager()
     monkeypatch.setattr(session_mod, "_session_manager", mgr)
     monkeypatch.setattr(mode_mod, "_PROMPTS_DIR", tmp_data_dir / "system_prompts")
-    monkeypatch.setattr(session_mod, "run_hooks", lambda *args, **kwargs: None)
-    monkeypatch.setattr(endpoints, "run_hooks", lambda *args, **kwargs: None)
+    # run_hooks removed from session/endpoints — hook types (session_created, etc.) deleted
     mode_mod.set_mode(1)
     mode_mod.set_step_mode(False)
     return mgr

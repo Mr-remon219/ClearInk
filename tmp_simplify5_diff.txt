@@ -1,0 +1,220 @@
+warning: in the working copy of 'src/clearink/tool/subagent/core.py', LF will be replaced by CRLF the next time Git touches it
+diff --git a/src/clearink/tool/subagent/core.py b/src/clearink/tool/subagent/core.py
+index 7a9a6cb..f3e84e7 100644
+--- a/src/clearink/tool/subagent/core.py
++++ b/src/clearink/tool/subagent/core.py
+@@ -3,8 +3,8 @@ from anthropic import Anthropic
+ from dotenv import load_dotenv
+ 
+ from ..register import register_tool, TOOL as ALL_TOOLS, TOOL_HANDLERS
++from .._llm_loop import run_llm_tool_loop
+ from ...config import ENV_PATH
+-from ...message import content_block_to_dict
+ 
+ load_dotenv(ENV_PATH, override=True)
+ 
+@@ -15,14 +15,15 @@ def _subagent_tools() -> list[dict]:
+ 
+ @register_tool(
+     name="spawn_subagent",
+-    description="将任务委派给子代理(flash模型,非思考模式)执行，"
+-                "适合简单并行的搜索、读文件等任务。子代理不能递归调用 spawn_subagent。",
++    description="Delegate a task to a sub-agent (flash model, non-thinking). "
++                "Suitable for simple parallel work like search, file reads. "
++                "Sub-agents cannot recursively call spawn_subagent.",
+     input_schema={
+         "type": "object",
+         "properties": {
+             "prompt": {
+                 "type": "string",
+-                "description": "子代理要执行的任务描述",
++                "description": "Task description for the sub-agent",
+             },
+         },
+         "required": ["prompt"],
+@@ -33,45 +34,16 @@ def spawn_subagent(prompt: str) -> str:
+     messages: list[dict] = [{"role": "user", "content": prompt}]
+     tools = _subagent_tools()
+     handlers = {k: v for k, v in TOOL_HANDLERS.items() if k != "spawn_subagent"}
+-    collected_text: list[str] = []
+ 
+-    for _ in range(5):
+-        response = sub_client.messages.create(
++    try:
++        return run_llm_tool_loop(
++            client=sub_client,
+             model=os.getenv("SUBAGENT_MODEL", "deepseek-v4-flash"),
++            system="You are a focused sub-agent. Complete the assigned task and return results.",
+             messages=messages,
+             tools=tools,
+-            max_tokens=2048,
+-            thinking={"type": "disabled"},
++            handlers=handlers,
++            max_turns=5,
+         )
+-
+-        if response.stop_reason == "end_turn":
+-            text = "".join(
+-                b.text for b in response.content if b.type == "text"
+-            )
+-            collected_text.append(text)
+-            return "\n".join(filter(None, collected_text)) or "[subagent returned no text]"
+-
+-        for block in response.content:
+-            if block.type == "text":
+-                text = block.text or ""
+-                collected_text.append(text)
+-                messages.append({"role": "assistant", "content": text})
+-            elif block.type == "tool_use":
+-                handler = handlers.get(block.name)
+-                try:
+-                    result = handler(**block.input) if handler else f"Unknown tool: {block.name}"
+-                except Exception as e:
+-                    result = f"Error: {e}"
+-                messages.append({"role": "assistant", "content": [content_block_to_dict(block)]})
+-                messages.append({
+-                    "role": "user",
+-                    "content": [{
+-                        "type": "tool_result",
+-                        "tool_use_id": block.id,
+-                        "content": str(result),
+-                    }],
+-                })
+-
+-    if collected_text:
+-        return "\n".join(collected_text) + "\n\n[subagent: max turns reached]"
+-    return "[subagent: max turns reached]"
++    except Exception as e:
++        return f"[subagent error: {e}]"
+diff --git a/src/clearink/tool/task_system/manager.py b/src/clearink/tool/task_system/manager.py
+index 2d97629..7c9c146 100644
+--- a/src/clearink/tool/task_system/manager.py
++++ b/src/clearink/tool/task_system/manager.py
+@@ -160,16 +160,21 @@ class TaskManager:
+             return msg
+ 
+     def get_task(self, task_id: str) -> str:
++        """Read a single task directly from its JSON file (O(1) I/O)."""
++        path = _task_file(task_id)
++        try:
++            task = json.loads(path.read_text(encoding="utf-8"))
++            return json.dumps(task, ensure_ascii=False, indent=2)
++        except (OSError, json.JSONDecodeError):
++            return f"Error: task '{task_id}' not found."
++
++    def refresh(self) -> None:
++        """Reload all tasks from disk (thread-safe)."""
+         with self._lock:
+             self._refresh()
+-            task = self.list_tasks.get(task_id)
+-            if task is None:
+-                return f"Error: task '{task_id}' not found."
+-            return json.dumps(task, ensure_ascii=False, indent=2)
+ 
+     def format_task_list(self) -> str:
+         with self._lock:
+-            self._refresh()
+             if not self.list_tasks:
+                 return "(no tasks)"
+ 
+@@ -184,6 +189,41 @@ class TaskManager:
+                 )
+             return "\n".join(lines)
+ 
++    def get_unblocked(self) -> list[dict]:
++        """Return all tasks that can start immediately (in-memory, no disk I/O)."""
++        with self._lock:
++            return [
++                task for tid, task in self.list_tasks.items()
++                if self.can_start(tid)
++            ]
++
++    def check_task_ready(self, task_id: str) -> str:
++        """Return a human-readable status string for a task (public API)."""
++        with self._lock:
++            task = self.list_tasks.get(task_id)
++            if task is None:
++                return f"Error: task '{task_id}' not found."
++            if self.can_start(task_id):
++                return f"Task '{task_id}' ({task['subject']}) is ready to start."
++            blocked = [
++                bid for bid in task.get("blockedBy", [])
++                if self.list_tasks.get(bid, {}).get("status") != "completed"
++            ]
++            if task["status"] != "pending":
++                return f"Task '{task_id}' is {task['status']}."
++            return f"Task '{task_id}' is blocked by: {blocked}"
++
++    def reset_task(self, task_id: str) -> str:
++        """Reset a task to pending (for reassignment after rejection)."""
++        with self._lock:
++            task = self.list_tasks.get(task_id)
++            if task is None:
++                return f"Error: task '{task_id}' not found."
++            task["status"] = "pending"
++            task["owner"] = ""
++            _write_task(task)
++            return f"Task '{task_id}' reset to pending."
++
+     # ── helpers ─────────────────────────────────────────
+ 
+     def _refresh(self) -> None:
+diff --git a/src/clearink/tool/task_system/tools.py b/src/clearink/tool/task_system/tools.py
+index 1758b6e..46801a6 100644
+--- a/src/clearink/tool/task_system/tools.py
++++ b/src/clearink/tool/task_system/tools.py
+@@ -112,14 +112,44 @@ def list_tasks() -> str:
+     },
+ )
+ def check_task(task_id: str) -> str:
++    return _manager.check_task_ready(task_id)
++
++
++@register_tool(
++    name="get_unblocked_tasks",
++    description="List all tasks that are ready to execute right now "
++                "(status=pending, all dependencies completed, not yet claimed). "
++                "Use this to identify parallel execution opportunities: "
++                "if count==1, execute directly; if count>=2, use execute_parallel.",
++    input_schema={
++        "type": "object",
++        "properties": {},
++        "required": [],
++    },
++)
++def get_unblocked_tasks() -> str:
++    """List all immediately executable (parallelizable) tasks."""
+     with _manager._lock:
+-        task = _manager.list_tasks.get(task_id)
+-        if task is None:
+-            return f"Error: task '{task_id}' not found."
+-        if _manager.can_start(task_id):
+-            return f"Task '{task_id}' ({task['subject']}) is ready to start."
+-        blocked = [bid for bid in task.get("blockedBy", [])
+-                   if _manager.list_tasks.get(bid, {}).get("status") != "completed"]
+-        if task["status"] != "pending":
+-            return f"Task '{task_id}' is {task['status']}."
+-        return f"Task '{task_id}' is blocked by: {blocked}"
++        _manager._refresh()
++        unblocked = []
++        for tid, task in _manager.list_tasks.items():
++            if _manager.can_start(tid):
++                unblocked.append(task)
++
++    if not unblocked:
++        return "(no unblocked tasks)"
++
++    lines = [f"{len(unblocked)} unblocked task(s) ready for execution:"]
++    for t in unblocked:
++        lines.append(
++            f"  #{t['id']}: {t['subject']}"
++            + (f" — {t.get('description', '')[:80]}" if t.get('description') else "")
++        )
++
++    if len(unblocked) >= 2:
++        lines.append(
++            f"\n💡 {len(unblocked)} tasks can run in parallel. "
++            f"Use execute_parallel(task_ids=[...]) to dispatch them simultaneously."
++        )
++
++    return "\n".join(lines)

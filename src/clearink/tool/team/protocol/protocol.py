@@ -5,7 +5,6 @@ Provides:
 - Response matching with type-safety validation (match_response)
 - Inbound message dispatch on the receiver side (handle_inbox_message)
 - Unified lead inbox consumption (consume_lead_inbox)
-- Idle notification (send_idle_notification)
 - Protocol registration API (register_protocol, register_protocol_handler)
 """
 
@@ -231,26 +230,6 @@ def handle_inbox_message(
     return False
 
 
-# ── Idle notification ─────────────────────────────────────────
-
-def send_idle_notification(teammate_name: str) -> None:
-    """Notify the lead that a teammate has become idle and is ready
-    to accept new tasks.  One-way notification — no response expected."""
-    bus = _get_bus()
-    bus.write("lead", {
-        "from": teammate_name,
-        "content": "",
-        "protocol": {
-            "type": "idle_notification",
-            "request_id": "",
-            "payload": {
-                "teammate": teammate_name,
-                "status": "idle",
-            },
-        },
-    })
-
-
 # ── Lead inbox consumption ────────────────────────────────────
 
 def consume_lead_inbox(route_protocol: bool = True) -> list[dict[str, Any]]:
@@ -285,13 +264,7 @@ def consume_lead_inbox(route_protocol: bool = True) -> list[dict[str, Any]]:
             req_id = protocol.get("request_id", "")
             payload = protocol.get("payload", {})
 
-            if ptype == "idle_notification":
-                result.append({
-                    "role": "user",
-                    "content": f"🟢 [Teammate {sender}]: (空闲) 等待新任务",
-                })
-
-            elif ptype in _response_type_map:
+            if ptype in _response_type_map:
                 approved = payload.get("approve", True)
                 matched = match_response(ptype, req_id, approved)
                 if matched:

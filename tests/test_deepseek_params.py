@@ -55,15 +55,8 @@ def test_agent_loop_passes_deepseek_model_and_extra_body(monkeypatch) -> None:
         patch.object(main_module, "_get_client", return_value=object()),
         patch.object(main_module, "safe_api_call", side_effect=fake_safe_api_call),
         patch.object(main_module, "get_system_prompt", return_value="system"),
-        patch.object(main_module, "load_memories", return_value=""),
-        patch.object(main_module, "extract_memories", return_value=[]),
         patch.object(main_module, "assemble_tool_pool", return_value=([], {})),
         patch.object(main_module, "run_hooks"),
-        patch.object(
-            main_module.background,
-            "collect_background_results",
-            return_value=[],
-        ),
         patch.object(main_module.team, "collect_teammate_messages", return_value=[]),
     ):
         messages = main_module.agent_loop([

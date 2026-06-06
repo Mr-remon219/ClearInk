@@ -1,7 +1,6 @@
 import time
 import threading
 import unittest
-from unittest.mock import patch
 
 from clearink.api.session import Session, SessionManager, get_session_manager
 
@@ -69,13 +68,10 @@ class TestSessionManager(unittest.TestCase):
         sess = self.mgr.create("my-custom-id")
         self.assertEqual(sess.session_id, "my-custom-id")
 
-    @patch("clearink.api.session.run_hooks")
-    def test_create_fires_hook(self, mock_run_hooks):
+    def test_create_returns_valid_session(self):
         sess = self.mgr.create()
-        mock_run_hooks.assert_called_once_with(
-            "session_created",
-            {"session_id": sess.session_id, "mode": 1},
-        )
+        self.assertIsNotNone(sess.session_id)
+        self.assertEqual(sess.mode, 1)
 
     def test_get_existing(self):
         created = self.mgr.create("sid1")
@@ -95,22 +91,14 @@ class TestSessionManager(unittest.TestCase):
         second = self.mgr.get_or_create("abc")
         self.assertIs(first, second)
 
-    @patch("clearink.api.session.run_hooks")
-    def test_delete_removes_and_fires_hook(self, mock_run_hooks):
+    def test_delete_removes_session(self):
         self.mgr.create("to-delete")
-        mock_run_hooks.reset_mock()
         self.mgr.delete("to-delete")
         self.assertIsNone(self.mgr.get("to-delete"))
-        mock_run_hooks.assert_called_once_with(
-            "session_destroyed",
-            {"session_id": "to-delete"},
-        )
 
-    @patch("clearink.api.session.run_hooks")
-    def test_delete_nonexistent_is_noop(self, mock_run_hooks):
+    def test_delete_nonexistent_is_noop(self):
         # Should not raise
         self.mgr.delete("does-not-exist")
-        mock_run_hooks.assert_not_called()
 
     def test_touch_updates_last_access(self):
         sess = self.mgr.create("t1")

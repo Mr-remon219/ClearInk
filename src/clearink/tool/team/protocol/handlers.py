@@ -6,6 +6,9 @@ Handlers come in two flavours:
               letting the AI teammate process the request naturally.
 
 Registered via register_protocol_handler() at module load.
+
+Currently only shutdown_request is supported — plan/review were removed
+in favour of the Regulation module's inspect_teammate + reject_and_reassign.
 """
 
 from __future__ import annotations
@@ -76,58 +79,13 @@ def _handle_shutdown_request(teammate_name: str, protocol: dict[str, Any]) -> di
     }
 
 
-# ── LLM handlers ───────────────────────────────────────────────
-
-
-def _handle_plan_request(teammate_name: str, protocol: dict[str, Any]) -> dict[str, Any] | None:
-    """Handle a plan_request: inject the plan into the LLM context.
-
-    The teammate's LLM will review the plan and respond — its output
-    is later wrapped in a plan_response protocol envelope by the idle loop.
-    """
-    plan_text = protocol.get("payload", {}).get("plan", "")
-    request_id = protocol.get("request_id", "")
-
-    return {
-        "role": "user",
-        "content": (
-            f"[Lead 请求审核计划 (request_id: {request_id})]:\n\n"
-            f"{plan_text}\n\n"
-            f"请审核该计划。回复时先明确说 approve 或 reject，然后附上理由。"
-        ),
-    }
-
-
-def _handle_review_request(teammate_name: str, protocol: dict[str, Any]) -> dict[str, Any] | None:
-    """Handle a review_request: inject the content into the LLM context.
-
-    The teammate's LLM will review the content and respond — its output
-    is later wrapped in a review_response protocol envelope.
-    """
-    review_content = protocol.get("payload", {}).get("content", "")
-    request_id = protocol.get("request_id", "")
-
-    return {
-        "role": "user",
-        "content": (
-            f"[Lead 请求评审 (request_id: {request_id})]:\n\n"
-            f"{review_content}\n\n"
-            f"请评审以上内容并给出详细意见。"
-        ),
-    }
-
-
 # ── Auto-registration ──────────────────────────────────────────
 
 def _register_default_protocols() -> None:
     """Called at module load to register all built-in protocols."""
     register_protocol("shutdown_request", "shutdown_response")
-    register_protocol("plan_request", "plan_response")
-    register_protocol("review_request", "review_response")
 
     register_protocol_handler("shutdown_request", "system", _handle_shutdown_request)
-    register_protocol_handler("plan_request", "llm", _handle_plan_request)
-    register_protocol_handler("review_request", "llm", _handle_review_request)
 
 
 _register_default_protocols()

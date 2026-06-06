@@ -7,7 +7,6 @@ no HTTP concern leaks into this module.
 
 from __future__ import annotations
 
-from clearink.hook import run_hooks
 from clearink.message import extract_text_from_content
 from clearink.user import mode as mode_mod
 
@@ -114,11 +113,6 @@ def query(
             response = format_browser_response(raw)
             messages_count = len(messages)
 
-        run_hooks(
-            "api_request",
-            {"endpoint": "query", "session_id": sess.session_id, "mode": mode},
-        )
-
         return _ok(
             session_id=sess.session_id,
             response=response,
@@ -165,11 +159,6 @@ def followup(text: str, session_id: str) -> dict:
             current_mode = sess.mode
             current_step_mode = sess.step_mode
             messages_count = len(messages)
-
-        run_hooks(
-            "api_request",
-            {"endpoint": "followup", "session_id": session_id, "mode": current_mode},
-        )
 
         return _ok(
             session_id=session_id,

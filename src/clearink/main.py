@@ -5,15 +5,11 @@ import os
 
 from .config import ENV_PATH
 from .tool.register import TOOL, TOOL_HANDLERS
-from .tool import basetool, skill, todo, subagent, task_system, background, scheduler, team, mcp_client  # noqa: F401 — registers tools
+from .tool import basetool, subagent, task_system, team, mcp_client, regulation  # noqa: F401 — registers tools
 from .tool.mcp_client import assemble_tool_pool
 from .hook import run_hooks, hook_context
-from .hook import audit  # noqa: F401 — registers audit-log hooks on all types
-from .system_prompt.memory_load import load_memories, extract_memories
-from .system_prompt.memory_store import consolidate_memories
 from .system_prompt.system_build import get_system_prompt
 from .error_recovery.wrapper import safe_api_call
-from .system_prompt import memory_tool  # noqa: F401 — registers save_memory tool
 from .context_compact import CompactConfig, compact_messages, reactive_compact
 from .context_compact.token_estimate import estimate_tokens
 from .message import content_blocks_to_dicts
@@ -87,10 +83,6 @@ def agent_loop(
             "hook_context": hook_context,
         })
 
-        # Collect completed background task results
-        for bg_result in background.collect_background_results():
-            messages.append({"role": "user", "content": bg_result})
-
         # Context compaction — once per turn, after hooks, before API call
         if turn_count > 0 and turn_count != last_compacted_turn:
             if turn_count % config.compact_interval_turns == 0:
@@ -110,9 +102,6 @@ def agent_loop(
                     )
 
             last_compacted_turn = turn_count
-
-        # Load relevant memories for this turn
-        load_memories(messages)
 
         try:
             # Merge MCP-discovered tools into the tool pool
@@ -152,12 +141,6 @@ def agent_loop(
             # Collect teammate messages before returning
             for tm_msg in team.collect_teammate_messages():
                 messages.append(tm_msg)
-
-            # Extract and consolidate memories from this session
-            extracted = extract_memories(messages)
-            if extracted:
-                result = consolidate_memories(extracted)
-                print(f"[Memory] {result}")
             return messages
 
         if response.stop_reason == "max_tokens":
@@ -192,13 +175,7 @@ def agent_loop(
 
             handler = TOOL_HANDLERS.get(tool_name) or mcp_handlers.get(tool_name)
             try:
-                if handler and background.should_run_background(tool_name, tool_args):
-                    result = background.start_background_task(
-                        tool_name, tool_args, handler,
-                    )
-                else:
-                    call_args = background.strip_runtime_control_args(tool_args)
-                    result = handler(**call_args) if handler else f"Unknown tool: {tool_name}"
+                result = handler(**tool_args) if handler else f"Unknown tool: {tool_name}"
                 error = None
             except Exception as e:
                 result = None
@@ -230,9 +207,4 @@ def agent_loop(
 def main():
     from clearink.user import run
 
-    scheduler.set_agent_loop(agent_loop)
-    scheduler.set_busy(True)
-    try:
-        run(agent_loop)
-    finally:
-        scheduler.set_busy(False)
+    run(agent_loop)

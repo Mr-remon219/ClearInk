@@ -1,11 +1,5 @@
 """Teammate protocol layer — structured request/response communication.
 
-Four-step protocol:
-  1. A sends request to B  (make_protocol_request)
-  2. B receives & routes    (handle_inbox_message)
-  3. B sends response       (wrapped by idle loop)
-  4. A receives & matches   (match_response / consume_lead_inbox)
-
 Key exports:
   ProtocolState           — dataclass tracking one request lifecycle
   pending_requests        — global registry: request_id → ProtocolState
@@ -13,7 +7,6 @@ Key exports:
   match_response()        — validate & update a pending request with a response
   handle_inbox_message()  — receiver-side dispatch (system / llm handlers)
   consume_lead_inbox()    — unified lead inbox reader + protocol router
-  send_idle_notification()— tell lead a teammate is free
   register_protocol()     — register a request/response type pair
   register_protocol_handler() — register a handler for a protocol type
   get_active_protocol_request() — thread-local: check if processing protocol
@@ -35,7 +28,6 @@ from .protocol import (
     make_protocol_request,
     match_response,
     handle_inbox_message,
-    send_idle_notification,
     consume_lead_inbox,
 )
 
@@ -54,6 +46,5 @@ __all__ = [
     "make_protocol_request",
     "match_response",
     "handle_inbox_message",
-    "send_idle_notification",
     "consume_lead_inbox",
 ]

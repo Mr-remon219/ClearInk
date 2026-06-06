@@ -7,8 +7,7 @@ the response-type mapping used to validate request/response matching.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, asdict
-from typing import Any
+from dataclasses import dataclass
 
 
 @dataclass
@@ -17,7 +16,7 @@ class ProtocolState:
 
     Fields:
         request_id: Unique monotonic ID like "req_004281".
-        type:       Protocol type, e.g. "shutdown_request", "plan_request".
+        type:       Protocol type, e.g. "shutdown_request".
         sender:     Who initiated the request ("lead" or teammate name).
         target:     Who should receive / process the request.
         status:     "pending" | "approved" | "rejected".
@@ -35,21 +34,6 @@ class ProtocolState:
     created_at: float
     responded_at: float | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize to a plain dict for JSONL bus transport."""
-        d = asdict(self)
-        return d
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> ProtocolState:
-        """Deserialize from a dict received via JSONL bus.
-
-        Only keys present in the dataclass fields are passed through,
-        matching the pattern used by CronJob.from_dict in scheduler.py.
-        """
-        valid = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
-        return cls(**valid)
-
 
 # ── Global state ──────────────────────────────────────────────
 
@@ -58,15 +42,12 @@ _request_lock = threading.RLock()
 _request_counter: int = 0
 
 # response_type → expected request_type
-# Ensures a shutdown_response can only match a shutdown_request, etc.
 _response_type_map: dict[str, str] = {
     "shutdown_response": "shutdown_request",
-    "plan_response":     "plan_request",
-    "review_response":   "review_request",
 }
 
 # protocol_type → (handler_kind, handler_fn)
-# handler_kind: "system" (code executes directly, no LLM) or "llm" (inject into LLM)
+# handler_kind: "system" (code executes directly, no LLM)
 _protocol_handlers: dict[str, tuple[str, object]] = {}
 
 # Per-thread tracking — so a teammate thread knows it is responding
