@@ -60,7 +60,8 @@ def test_api_import_does_not_load_main_runtime() -> None:
         [sys.executable, "-c", code],
         check=True,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 

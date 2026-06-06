@@ -18,7 +18,8 @@ def _run_config_probe(code: str, cwd: Path) -> subprocess.CompletedProcess[str]:
         cwd=cwd,
         check=True,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -72,7 +73,8 @@ def test_data_dir_prefers_cwd_data_when_env_missing(tmp_path, monkeypatch) -> No
         env=env,
         check=True,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
     assert Path(result.stdout.strip()) == cwd_data

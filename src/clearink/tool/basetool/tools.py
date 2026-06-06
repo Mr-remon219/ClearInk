@@ -1,3 +1,5 @@
+import os
+import platform
 import subprocess
 from pathlib import Path
 
@@ -26,12 +28,24 @@ def run_bash(command: str, timeout: int = 120) -> str:
     # shell=True allows complex commands but trusts model-generated input.
     # In a multi-tenant or internet-facing deployment this would need sandboxing.
     try:
+        # Ensure subprocesses output UTF-8 (especially Python on Windows,
+        # which defaults to the system ANSI code page for piped stdout).
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+
+        # On Windows, cmd.exe defaults to the system ANSI code page (e.g., gbk).
+        # Switch to UTF-8 (code page 65001) so builtins like dir/type output UTF-8.
+        if platform.system() == "Windows":
+            command = f"chcp 65001 >nul && {command}"
+
         result = subprocess.run(
             command,
             shell=True,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
+            env=env,
         )
         output = result.stdout
         if result.stderr:
